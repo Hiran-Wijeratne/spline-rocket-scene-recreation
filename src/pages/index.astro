@@ -18,9 +18,41 @@
       }
       #c.ready { opacity: 1; }
       canvas { display: block; width: 100% !important; height: 100% !important; }
+
+      #loader {
+        position: fixed; inset: 0;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        background: #000;
+        transition: opacity 0.8s ease;
+        z-index: 10;
+      }
+      #loader.hidden { opacity: 0; pointer-events: none; }
+      #loader-bar-wrap {
+        width: 180px; height: 2px;
+        background: rgba(255,255,255,0.12);
+        border-radius: 2px; overflow: hidden;
+        margin-top: 20px;
+      }
+      #loader-bar {
+        height: 100%; width: 0%;
+        background: linear-gradient(90deg, #4488ff, #aa44ff);
+        border-radius: 2px;
+        transition: width 0.3s ease;
+      }
+      #loader-text {
+        font-family: system-ui, sans-serif;
+        font-size: 11px; letter-spacing: 0.18em;
+        color: rgba(255,255,255,0.35);
+        text-transform: uppercase;
+      }
     </style>
   </head>
   <body>
+    <div id="loader">
+      <div id="loader-text">Loading</div>
+      <div id="loader-bar-wrap"><div id="loader-bar"></div></div>
+    </div>
     <div id="c"><canvas id="cv"></canvas></div>
 
     <script>
@@ -29,8 +61,21 @@
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
       import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 
-      const wrap   = document.getElementById("c")!;
-      const canvas = document.getElementById("cv") as HTMLCanvasElement;
+      const wrap      = document.getElementById("c")!;
+      const canvas    = document.getElementById("cv") as HTMLCanvasElement;
+      const loaderEl  = document.getElementById("loader")!;
+      const loaderBar = document.getElementById("loader-bar")! as HTMLElement;
+
+      // Track loading progress across both GLBs (each contributes 50%)
+      const progress = { rocket: 0, flame: 0 };
+      function updateProgress() {
+        const pct = (progress.rocket * 0.5 + progress.flame * 0.5) * 100;
+        loaderBar.style.width = `${Math.min(pct, 98)}%`;
+      }
+      function hideLoader() {
+        loaderBar.style.width = '100%';
+        setTimeout(() => loaderEl.classList.add('hidden'), 300);
+      }
 
       // ── Renderer ──────────────────────────────────────────────────────────
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -570,10 +615,17 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
       let pivot: THREE.Group | null = null;
       let spinGroup: THREE.Group | null = null;
 
-      const loadGLB = (url: string) =>
-        new Promise<any>((res, rej) => loader.load(url, res, undefined, rej));
+      const loadGLB = (url: string, onProg?: (n: number) => void) =>
+        new Promise<any>((res, rej) =>
+          loader.load(url, res, (e: ProgressEvent) => {
+            if (e.lengthComputable && onProg) onProg(e.loaded / e.total);
+          }, rej)
+        );
 
-      Promise.all([loadGLB("/Orange_Rocket.glb"), loadGLB("/toy_rocket.glb")])
+      Promise.all([
+        loadGLB("/Orange_Rocket.glb", (n) => { progress.rocket = n; updateProgress(); }),
+        loadGLB("/toy_rocket.glb",    (n) => { progress.flame  = n; updateProgress(); }),
+      ])
         .then(([rocketGltf, flameGltf]) => {
 
           // ── Rocket body ───────────────────────────────────────────
@@ -702,6 +754,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
           scene.add(pivot);
 
           wrap.classList.add("ready");
+          hideLoader();
         })
         .catch((e: any) => console.error("GLB load error:", e));
 

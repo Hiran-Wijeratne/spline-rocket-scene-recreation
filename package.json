@@ -16,5 +16,10 @@
     "@types/three": "^0.184.1",
     "astro": "^6.4.2",
     "three": "^0.184.0"
+  },
+  "devDependencies": {
+    "@gltf-transform/core": "^4.3.0",
+    "@gltf-transform/extensions": "^4.3.0",
+    "@gltf-transform/functions": "^4.3.0"
   }
 }
