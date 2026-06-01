@@ -1,17 +1,18 @@
 /**
- * GLB optimizer — strips unused textures/UVs, deduplicates accessors,
- * and welds vertices. Run once after updating source GLBs:
- *   node scripts/optimize-glb.mjs
+ * GLB optimizer — strips unused textures/UVs and deduplicates accessors.
+ * Safe for custom GLSL shaders: no quantize or weld (both change vertex
+ * positions in ways that break our gradient/displacement shaders).
+ * Run once after updating source GLBs:  node scripts/optimize-glb.mjs
  */
 import { NodeIO } from '@gltf-transform/core';
 import { ALL_EXTENSIONS } from '@gltf-transform/extensions';
-import { dedup, prune, weld, quantize } from '@gltf-transform/functions';
-import { readFileSync, statSync } from 'fs';
+import { dedup, prune } from '@gltf-transform/functions';
+import { statSync } from 'fs';
 import { resolve } from 'path';
 
 const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
 
-async function optimize(inputPath, outputPath, { stripTextures = true, stripUVs = true } = {}) {
+async function optimize(inputPath, outputPath, { stripTextures = true, stripUVs = false } = {}) {
   const before = statSync(inputPath).size;
   console.log(`\nProcessing: ${inputPath}`);
   console.log(`  Before: ${(before / 1024 / 1024).toFixed(2)} MB`);
@@ -20,7 +21,6 @@ async function optimize(inputPath, outputPath, { stripTextures = true, stripUVs 
   const root = doc.getRoot();
 
   if (stripTextures) {
-    // Disconnect all texture references from materials so textures become orphaned
     for (const mat of root.listMaterials()) {
       mat.setBaseColorTexture(null);
       mat.setNormalTexture(null);
@@ -28,32 +28,24 @@ async function optimize(inputPath, outputPath, { stripTextures = true, stripUVs 
       mat.setOcclusionTexture(null);
       mat.setEmissiveTexture(null);
     }
-    // Dispose orphaned textures
     for (const tex of root.listTextures()) {
       tex.dispose();
     }
   }
 
   if (stripUVs) {
-    // Remove TEXCOORD_0 (we use only POSITION + NORMAL in our custom shaders)
     for (const mesh of root.listMeshes()) {
       for (const prim of mesh.listPrimitives()) {
         const uv = prim.getAttribute('TEXCOORD_0');
-        if (uv) {
-          prim.setAttribute('TEXCOORD_0', null);
-        }
+        if (uv) prim.setAttribute('TEXCOORD_0', null);
       }
     }
   }
 
-  // Quantize positions/normals to 16-bit integers (halves geometry size with no visual loss)
-  // dedup merges identical accessors, prune removes orphaned resources
-  await doc.transform(
-    quantize({ quantizePosition: 14, quantizeNormal: 10 }),
-    dedup(),
-    prune(),
-    weld({ tolerance: 1e-4 }),
-  );
+  // dedup merges shared identical accessors; prune drops orphaned resources.
+  // No quantize (changes position encoding, breaks custom shaders).
+  // No weld (merges vertices, can corrupt displacement geometry).
+  await doc.transform(dedup(), prune());
 
   await io.write(outputPath, doc);
 
@@ -64,14 +56,16 @@ async function optimize(inputPath, outputPath, { stripTextures = true, stripUVs 
 
 const root = resolve(process.cwd(), 'public');
 
+// Rocket: strip the 3x 4096px PNGs + unused UV coords — huge win, UVs unused in our shader
 await optimize(`${root}/Orange_Rocket.glb`, `${root}/Orange_Rocket.glb`, {
   stripTextures: true,
   stripUVs: true,
 });
 
+// Flame: strip tiny textures only — keep all geometry intact
 await optimize(`${root}/toy_rocket.glb`, `${root}/toy_rocket.glb`, {
   stripTextures: true,
-  stripUVs: false, // keep UVs on flame in case needed
+  stripUVs: false,
 });
 
 console.log('\nDone.');
