@@ -1,0 +1,762 @@
+---
+---
+
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="generator" content={Astro.generator} />
+    <title>Rocket Scene</title>
+    <style>
+      *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
+      html { background: #000; }
+      body { width: 100%; min-height: 100vh; background: #000; }
+      #c {
+        position: fixed; inset: 0;
+        opacity: 0; transition: opacity 1.2s ease;
+      }
+      #c.ready { opacity: 1; }
+      canvas { display: block; width: 100% !important; height: 100% !important; }
+    </style>
+  </head>
+  <body>
+    <div id="c"><canvas id="cv"></canvas></div>
+
+    <script>
+      import * as THREE from "three";
+      import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
+      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
+      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
+
+      const wrap   = document.getElementById("c")!;
+      const canvas = document.getElementById("cv") as HTMLCanvasElement;
+
+      // ── Renderer ──────────────────────────────────────────────────────────
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 2.0;
+
+      // Studio HDR for IBL reflections, galaxy jpg for visible background
+      const pmremGenerator = new THREE.PMREMGenerator(renderer);
+      pmremGenerator.compileEquirectangularShader();
+
+      // Load studio HDR → environment only (reflections)
+      new RGBELoader().load('/studion light 4k.hdr', (hdrTex) => {
+        const envMap = pmremGenerator.fromEquirectangular(hdrTex).texture;
+        scene.environment = envMap;
+        hdrTex.dispose();
+        pmremGenerator.dispose();
+      });
+
+      // Galaxy jpg → background only (visible backdrop stays dark space)
+      new THREE.TextureLoader().load('/dark-galaxy-background.jpg', (tex) => {
+        tex.mapping = THREE.EquirectangularReflectionMapping;
+        scene.background = tex;
+      });
+
+      // ── Scene / camera ────────────────────────────────────────────────────
+      const scene  = new THREE.Scene();
+
+      const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 1000);
+      camera.position.set(0, 0, 10);
+
+      const controls = new OrbitControls(camera, canvas);
+      controls.enableDamping = true;
+      controls.dampingFactor = 0.06;
+      controls.enablePan = false;
+      controls.enableZoom = true;
+      controls.zoomSpeed = 1.2;
+      controls.minDistance = 1;
+      controls.maxDistance = 500;
+
+      // ── Click-to-jump spring ──────────────────────────────────────────
+      const spring = { ox: 0, oy: 0, tx: 0, ty: 0 };
+      canvas.addEventListener('click', (e) => {
+        if (!pivot) return;
+        const rPos = new THREE.Vector3().setFromMatrixPosition(pivot.matrixWorld);
+        rPos.project(camera);
+        const sx = (rPos.x * 0.5 + 0.5) * window.innerWidth;
+        const sy = (1 - (rPos.y * 0.5 + 0.5)) * window.innerHeight;
+        const dx = e.clientX - sx;
+        const dy = e.clientY - sy;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        if (dist > 280) return;
+        const nx = dx / (dist || 1);
+        const ny = dy / (dist || 1);
+        spring.tx -= nx * 3.0;
+        spring.ty += ny * 3.0;
+      });
+
+      // ── Cinematic lighting ────────────────────────────────────────────
+
+      // Right key — warm white, dominant, creates main hot reflection on right face
+      const keyLight = new THREE.DirectionalLight(0xfff8e8, 2.0);
+      keyLight.position.set(5, 3, 5);
+      scene.add(keyLight);
+
+      // Right back — warm orange, creates second specular streak on back-right edge
+      const rightBackFill = new THREE.DirectionalLight(0xff8833, 1.2);
+      rightBackFill.position.set(6, 1, -7);
+      scene.add(rightBackFill);
+
+      // Rim — deep blue from behind, cuts sharp silhouette edge
+      const rimLight = new THREE.DirectionalLight(0x2255ff, 18.0);
+      rimLight.position.set(-1, 4, -10);
+      scene.add(rimLight);
+
+      // Nose highlight — layer 1 only, so it exclusively illuminates the nose cone mesh
+      const noseLight = new THREE.DirectionalLight(0xfffaf0, 3000.0);
+      noseLight.position.set(0, 10, 1);
+      noseLight.layers.set(1);
+      scene.add(noseLight);
+
+      // Purple accent — subtle colour fill so shadow side isn't cold grey
+      const fillLight = new THREE.DirectionalLight(0x8833ff, 0.6);
+      fillLight.position.set(-4, -1, 5);
+      scene.add(fillLight);
+
+      // Flame glow — orange point light below nozzle, flickers in render loop
+      const flameGlow = new THREE.PointLight(0xff6600, 3, 14);
+      flameGlow.position.set(0, -2.5, 0.5);
+      scene.add(flameGlow);
+
+      // ── Stars ──────────────────────────────────────────────────────────
+      (() => {
+        const pos: number[] = [];
+        for (let i = 0; i < 300; i++) {
+          pos.push(
+            (Math.random() - 0.5) * 400,
+            (Math.random() - 0.5) * 400,
+            (Math.random() - 0.5) * 400 - 40
+          );
+        }
+        const g = new THREE.BufferGeometry();
+        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, sizeAttenuation: true })));
+      })();
+
+      // ── Motion particles — streaks falling at rocket's tilt angle ────
+      const PCNT = 6;
+      const pPos = new Float32Array(PCNT * 3);
+      for (let i = 0; i < PCNT; i++) {
+        pPos[i * 3]     = Math.random() * 80 - 20;  // -20 to +60, wide & right-biased
+        pPos[i * 3 + 1] = (Math.random() - 0.5) * 100;
+        pPos[i * 3 + 2] = -(Math.random() * 20 + 2);
+      }
+      const pGeo = new THREE.BufferGeometry();
+      pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
+      const pMat = new THREE.PointsMaterial({
+        color: 0x88bbff, size: 0.58, sizeAttenuation: true,
+        transparent: true, opacity: 1.0,
+      });
+      const motionParticles = new THREE.Points(pGeo, pMat);
+      scene.add(motionParticles);
+
+      // ── Custom materials ──────────────────────────────────────────────
+      // Fuselage: GLSL gradient driven by local vertex Y position.
+      // Mesh 10 (Main fuselage) local Y range: -219.7 → 227.7
+      // Colors match the reference: orange-red → pink → purple → blue → black nose
+      const fuselageMat = new THREE.ShaderMaterial({
+        vertexShader: /* glsl */`
+          varying vec3 vPos;
+          varying vec3 vNorm;
+          void main() {
+            vPos  = position;
+            vNorm = normalMatrix * normal;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */`
+          varying vec3 vPos;
+          varying vec3 vNorm;
+
+          vec3 grad(float t) {
+            // t = 0 (bottom / engine) → 1 (nose tip)
+            if (t < 0.18) return mix(vec3(0.85, 0.22, 0.05), vec3(0.90, 0.18, 0.42), t / 0.18);
+            if (t < 0.40) return mix(vec3(0.90, 0.18, 0.42), vec3(0.72, 0.06, 0.82), (t - 0.18) / 0.22);
+            if (t < 0.60) return mix(vec3(0.72, 0.06, 0.82), vec3(0.10, 0.32, 0.92), (t - 0.40) / 0.20);
+            if (t < 0.78) return mix(vec3(0.10, 0.32, 0.92), vec3(0.04, 0.10, 0.55), (t - 0.60) / 0.18);
+            if (t < 0.90) return mix(vec3(0.04, 0.10, 0.55), vec3(0.02, 0.02, 0.08), (t - 0.78) / 0.12);
+            return vec3(0.01, 0.005, 0.02);
+          }
+
+          void main() {
+            float t   = clamp((vPos.y + 219.7) / 447.4, 0.0, 1.0);
+            vec3  col = grad(t);
+
+            vec3  n   = normalize(vNorm);
+            // Key light
+            float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
+            // Warm fill from below
+            float f   = max(dot(n, normalize(vec3(0.0, -1.0, 0.3))), 0.0) * 0.25;
+            // Rim
+            float rim = pow(1.0 - max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0), 4.0) * 0.35;
+
+            col = col * (0.35 + d * 0.65 + f) + rim * vec3(0.25, 0.15, 0.70);
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+      });
+
+      // Flame — animated displacement + gradient (dark tip → bright base)
+      // Displacement strength ~17 units (from Spline settings), driven by time noise
+      const flameUniforms = { time: { value: 0 } };
+
+      const flameMat = new THREE.ShaderMaterial({
+        uniforms: flameUniforms,
+        depthWrite: true,
+        depthTest: true,
+        vertexShader: /* glsl */`
+          uniform float time;
+          varying vec3  vPos;
+          varying vec3  vNorm;
+          varying float vNoise;
+
+          // ── Ashima Arts 3-D Simplex Noise ──────────────────────────────
+          vec3 mod289v3(vec3 x){return x-floor(x*(1./289.))*289.;}
+          vec4 mod289v4(vec4 x){return x-floor(x*(1./289.))*289.;}
+          vec4 permute(vec4 x){return mod289v4(((x*34.)+10.)*x);}
+          vec4 taylorInvSqrt(vec4 r){return 1.79284291400159-0.85373472095314*r;}
+
+          float snoise(vec3 v){
+            const vec2 C=vec2(1./6.,1./3.);
+            vec3 i=floor(v+dot(v,C.yyy));
+            vec3 x0=v-i+dot(i,C.xxx);
+            vec3 g=step(x0.yzx,x0.xyz);
+            vec3 l=1.-g;
+            vec3 i1=min(g.xyz,l.zxy);
+            vec3 i2=max(g.xyz,l.zxy);
+            vec3 x1=x0-i1+C.xxx;
+            vec3 x2=x0-i2+C.yyy;
+            vec3 x3=x0-vec3(.5);
+            i=mod289v3(i);
+            vec4 p=permute(permute(permute(
+              i.z+vec4(0.,i1.z,i2.z,1.))
+             +i.y+vec4(0.,i1.y,i2.y,1.))
+             +i.x+vec4(0.,i1.x,i2.x,1.));
+            vec3 ns=vec3(1./7.)*(vec3(0.,5./7.,2./7.)*vec3(1.)-vec3(1./7.));
+            vec4 j=p-49.*floor(p*(1./49.));
+            vec4 x_=floor(j*(1./7.));
+            vec4 y_=floor(j-7.*x_);
+            vec4 x=x_*(1./7.)+ns.x;
+            vec4 y=y_*(1./7.)+ns.x;
+            vec4 h=1.-abs(x)-abs(y);
+            vec4 b0=vec4(x.xy,y.xy);
+            vec4 b1=vec4(x.zw,y.zw);
+            vec4 s0=floor(b0)*2.+1.;
+            vec4 s1=floor(b1)*2.+1.;
+            vec4 sh=-step(h,vec4(0.));
+            vec4 a0=b0.xzyw+s0.xzyw*sh.xxyy;
+            vec4 a1=b1.xzyw+s1.xzyw*sh.zzww;
+            vec3 p0=vec3(a0.xy,h.x);
+            vec3 p1=vec3(a0.zw,h.y);
+            vec3 p2=vec3(a1.xy,h.z);
+            vec3 p3=vec3(a1.zw,h.w);
+            vec4 norm=taylorInvSqrt(vec4(dot(p0,p0),dot(p1,p1),dot(p2,p2),dot(p3,p3)));
+            p0*=norm.x; p1*=norm.y; p2*=norm.z; p3*=norm.w;
+            vec4 m=max(.5-vec4(dot(x0,x0),dot(x1,x1),dot(x2,x2),dot(x3,x3)),0.);
+            m=m*m;
+            return 105.*dot(m*m,vec4(dot(p0,x0),dot(p1,x1),dot(p2,x2),dot(p3,x3)));
+          }
+
+          // fBm layered over Ashima simplex
+          float fbm(vec3 p){
+            float v=0.,a=.5;
+            for(int i=0;i<4;i++){v+=a*snoise(p);p*=2.1;a*=.5;}
+            return v;
+          }
+
+          void main(){
+            vPos = position;
+
+            float t = clamp((position.y + 224.0) / 448.0, 0.0, 1.0);
+
+            // Spiral: rotate X/Z sampling coords by an angle that grows with height + time
+            // This makes each height band sample a different rotational slice → helix ripples
+            float spiral = t * 5.0 + time * 1.2;
+            float cs = cos(spiral), sn = sin(spiral);
+            float px = position.x / 448.0;
+            float pz = position.z / 448.0;
+
+            // Low frequency (scale 1.8) = large broad ripples
+            float scale = 1.8;
+            vec3 noiseCoord = vec3(
+              (cs * px - sn * pz) * scale,
+              t * scale + time * 2.5,        // scroll downward
+              (sn * px + cs * pz) * scale + time * 0.4
+            );
+
+            vNoise = fbm(noiseCoord);
+            float ampT = mix(0.4, 1.0, t);
+            float disp = vNoise * 70.0 * ampT;
+
+            // Compute displaced surface normals via finite-difference tangent vectors.
+            // Step e units in world-space X and Z; the corresponding noise-coord
+            // delta accounts for the spiral rotation so the gradient is accurate.
+            float e  = 12.0;
+            float kx = scale / 448.0;
+            float n_x = fbm(noiseCoord + vec3( cs * kx, 0.0,  sn * kx) * e);
+            float n_z = fbm(noiseCoord + vec3(-sn * kx, 0.0,  cs * kx) * e);
+            vec3 tangX = vec3(e, 0.0, 0.0) + normal * (n_x - vNoise) * 70.0 * ampT;
+            vec3 tangZ = vec3(0.0, 0.0, e) + normal * (n_z - vNoise) * 70.0 * ampT;
+            vec3 displacedNorm = normalize(cross(tangZ, tangX));
+
+            vec3 displaced = position + normal * disp;
+            // Slight taper near nozzle: 100% width at tip, ~82% at nozzle end
+            float taper = mix(1.0, 0.82, t);
+            displaced.x *= taper;
+            displaced.z *= taper;
+            vNorm       = normalMatrix * displacedNorm;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(displaced, 1.0);
+          }
+        `,
+        fragmentShader: /* glsl */`
+          varying vec3  vPos;
+          varying vec3  vNorm;
+          varying float vNoise;
+
+          void main() {
+            float t = clamp((vPos.y + 224.0) / 448.0, 0.0, 1.0);
+
+            // Noise shifts where each pixel sits on the gradient — color bands
+            // ripple organically with the displacement instead of being flat rings
+            float tColor = clamp(t + vNoise * 0.20, 0.0, 1.0);
+
+            vec3 col;
+            if      (tColor < 0.28) col = mix(vec3(1.00, 1.00, 1.00), vec3(2.00, 1.80, 0.10), tColor / 0.28);
+            else if (tColor < 0.80) col = mix(vec3(2.00, 1.80, 0.10), vec3(1.80, 1.40, 0.05), (tColor - 0.28) / 0.52);
+            else if (tColor < 0.92) col = mix(vec3(1.80, 1.40, 0.05), vec3(0.88, 0.18, 0.04), (tColor - 0.80) / 0.12);
+            else                    col = mix(vec3(0.88, 0.18, 0.04), vec3(0.68, 0.04, 0.02), (tColor - 0.92) / 0.08);
+
+            col *= (1.3 - t * 0.3);
+
+            // Sharpen contrast: peaks bright, valleys dark (internal shadow look)
+            float hotspot = pow(clamp(vNoise * 0.5 + 0.5, 0.0, 1.0), 1.5);
+            vec3 valleyCol = mix(vec3(0.85, 0.04, 0.02), vec3(0.65, 0.06, 0.02), smoothstep(0.0, 0.40, hotspot));
+            col = mix(valleyCol, col * vec3(1.4, 1.1, 0.8), hotspot);
+            // Emissive: only the brightest peaks self-illuminate like glowing fire
+            float emit = smoothstep(0.68, 1.0, hotspot);
+            col += emit * vec3(0.95, 0.55, 0.10) * 0.6;
+            // White highlight on the very top of displacement peaks
+            float peakWhite = smoothstep(0.30, 1.0, hotspot);
+            col += peakWhite * vec3(1.0, 1.0, 1.0) * 0.5;
+
+            // Bottom tip → white (only bottom 10%)
+            float bottomGlow = smoothstep(0.20, 0.0, t);
+            col = mix(col, vec3(1.3, 1.3, 1.2), bottomGlow * 0.9);
+
+            vec3 n = normalize(vNorm);
+            float diff    = max(dot(n, normalize(vec3(1.0, 0.2, 0.3))), 0.0);
+            float facing  = max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0);
+            float rim     = 1.0 - facing;
+
+            // Core darker than outer shell
+            float coreDark = mix(0.55, 1.0, pow(rim, 1.5));
+            col = col * (0.60 + diff * 0.40) * coreDark;
+
+            // Moderate rim glow — same ballpark as original fresnel
+            float fresnel = pow(rim, 2.5) * 0.60;
+            col += fresnel * vec3(1.0, 0.50, 0.10);
+
+            // Dark long red rectangles — front-facing and directly behind, upper flame
+            float ang = atan(vPos.x, vPos.z);
+            float frontStripe = smoothstep(0.65, 0.05, abs(ang));
+            float backStripe  = smoothstep(0.65, 0.05, 3.14159 - abs(ang));
+            float heightMask  = smoothstep(0.38, 0.58, t) * smoothstep(1.02, 0.86, t);
+            float rectMask    = max(frontStripe, backStripe) * heightMask;
+            col = mix(col, vec3(0.90, 0.05, 0.02), rectMask * 0.36);
+
+            // Nozzle hole at top
+            float nozzleHole = facing * smoothstep(0.25, 1.0, t) * 0.60;
+            col *= (1.0 - nozzleHole);
+
+            gl_FragColor = vec4(col, 1.0);
+          }
+        `,
+      });
+
+      // Solid PBR materials for the remaining parts
+      const windowMat = new THREE.MeshStandardMaterial({
+        color: 0x1155cc, emissive: 0x061830, roughness: 0.3, metalness: 0,
+      });
+      const edgeMat = new THREE.MeshStandardMaterial({
+        color: 0x111118, roughness: 0.85, metalness: 0,
+      });
+      const finsMat = new THREE.MeshStandardMaterial({
+        color: 0x28205a, roughness: 0.9, metalness: 0,
+      });
+
+      // ── Fuselage / fins: near-mirror MeshStandardMaterial + gradient ─────
+      // metalness≈1, roughness≈0 → galaxy env map reflects across the surface.
+      // onBeforeCompile injects the gradient colour into the PBR diffuse slot
+      // so the gradient tints the reflections rather than replacing them.
+
+      // baseMx = mesh.matrixWorld captured before pivot tilt is applied,
+      // so the gradient Y is always in untilted rocket space.
+      function makeFuselageMat(yMin: number, yMax: number, baseMx: THREE.Matrix4) {
+        const mat = new THREE.MeshPhysicalMaterial({
+          metalness: 0.3,
+          roughness: 0.45,
+          clearcoat: 0.4,
+          clearcoatRoughness: 0.35,
+          envMapIntensity: 2.0,
+        });
+        mat.customProgramCacheKey = () => `fuse_${yMin.toFixed(1)}_${yMax.toFixed(1)}`;
+        mat.onBeforeCompile = (shader: any) => {
+          shader.uniforms.yMin   = { value: yMin };
+          shader.uniforms.yMax   = { value: yMax };
+          shader.uniforms.baseMx = { value: baseMx };
+          shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', `#include <common>
+uniform float yMin; uniform float yMax;
+uniform mat4  baseMx;
+varying float vGradT;`)
+            .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec3 rp = (baseMx * vec4(position,1.0)).xyz;
+float rawT = (rp.y - yMin) / (yMax - yMin);
+float ang = atan(rp.x, rp.z);
+float sway = sin(ang*2.0)*0.018 + sin(ang*5.0+0.9)*0.010 + sin(ang*9.0+2.3)*0.005;
+vGradT = clamp(rawT + sway, 0.0, 1.0);`);
+          shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', `#include <common>
+varying float vGradT;
+vec3 fuseGrad(float t){
+  if(t<0.50) return mix(vec3(0.04,0.50,1.00),vec3(0.16,0.08,0.98),t/0.50);
+  if(t<0.62) return mix(vec3(0.16,0.08,0.98),vec3(0.45,0.04,0.88),(t-0.50)/0.12);
+  if(t<0.73) return mix(vec3(0.45,0.04,0.88),vec3(0.80,0.06,0.22),(t-0.62)/0.11);
+  if(t<0.83) return mix(vec3(0.80,0.06,0.22),vec3(0.88,0.12,0.03),(t-0.73)/0.10);
+  if(t<0.92) return mix(vec3(0.88,0.12,0.03),vec3(0.85,0.25,0.04),(t-0.83)/0.09);
+  return     mix(vec3(0.85,0.25,0.04),vec3(0.80,0.35,0.06),(t-0.92)/0.08);
+}`)
+            .replace('vec4 diffuseColor = vec4( diffuse, opacity );',
+              `vec3 _gc = fuseGrad(vGradT);
+float _lum = dot(_gc, vec3(0.2126,0.7152,0.0722));
+_gc = clamp(mix(vec3(_lum), _gc, 1.4), 0.0, 1.0);
+vec4 diffuseColor = vec4(_gc, opacity);`);
+        };
+        return mat;
+      }
+
+      function makeFinMat(yMin: number, yMax: number, baseMx: THREE.Matrix4) {
+        return new THREE.ShaderMaterial({
+          uniforms: {
+            yMin:   { value: yMin },
+            yMax:   { value: yMax },
+            baseMx: { value: baseMx },
+          },
+          vertexShader: /* glsl */`
+            uniform float yMin, yMax;
+            uniform mat4  baseMx;
+            varying float vT;
+            varying vec3  vNorm;
+            void main() {
+              float preY = (baseMx * vec4(position, 1.0)).y;
+              vT    = clamp((preY - yMin) / (yMax - yMin), 0.0, 1.0);
+              vNorm = normalMatrix * normal;
+              gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+            }
+          `,
+          fragmentShader: /* glsl */`
+            varying float vT;
+            varying vec3  vNorm;
+            vec3 finGrad(float t) {
+              if(t<0.55) return mix(vec3(0.04,0.50,1.00), vec3(0.20,0.08,0.97), t/0.55);
+              if(t<0.78) return mix(vec3(0.20,0.08,0.97), vec3(0.58,0.04,0.84), (t-0.55)/0.23);
+              return mix(vec3(0.58,0.04,0.84), vec3(0.85,0.05,0.55), (t-0.78)/0.22);
+            }
+            void main() {
+              vec3 col = finGrad(vT);
+              vec3 n = normalize(vNorm);
+              float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
+              float f   = max(dot(n, normalize(vec3(0.0,-1.0, 0.3))), 0.0) * 0.25;
+              float rim = pow(1.0 - max(dot(n, vec3(0.0,0.0,1.0)), 0.0), 4.0) * 0.30;
+              col = col * (0.35 + d*0.65 + f) + rim * vec3(0.20,0.10,0.60);
+              gl_FragColor = vec4(col, 1.0);
+            }
+          `,
+        });
+      }
+
+      // ── Strip texture from rocket fuselage + fins ─────────────────────
+      function customizeRocketMaterials(
+        root: THREE.Object3D, worldYMin: number, worldYMax: number
+      ) {
+        const rootBox  = new THREE.Box3().setFromObject(root);
+        const rootSize = rootBox.getSize(new THREE.Vector3());
+        const rootCtr  = rootBox.getCenter(new THREE.Vector3());
+
+        root.traverse((child) => {
+          const mesh = child as THREE.Mesh;
+          if (!mesh.isMesh) return;
+
+          const wb  = new THREE.Box3().setFromObject(mesh);
+          const ws  = wb.getSize(new THREE.Vector3());
+          const wc  = wb.getCenter(new THREE.Vector3());
+          const lat = Math.sqrt((wc.x - rootCtr.x) ** 2 + (wc.z - rootCtr.z) ** 2);
+          const hRatio  = ws.y / rootSize.y;
+          const maxLat  = Math.max(ws.x, ws.z);
+          const flatness = ws.y / (maxLat + 0.0001);
+
+          // Fuselage: tall (>30% rocket height), taller than wide, near axis
+          const isFuselage = hRatio > 0.30 && flatness > 1.0 && lat < rootSize.x * 0.3;
+
+          // Fins: in lower half, laterally offset
+          const isFin = wc.y < rootCtr.y
+            && lat > rootSize.x * 0.06
+            && hRatio < 0.55
+            && maxLat > rootSize.x * 0.08;
+
+          if (isFuselage) {
+            mesh.updateWorldMatrix(true, false);
+            mesh.material = makeFuselageMat(worldYMin, worldYMax, mesh.matrixWorld.clone());
+          } else if (isFin) {
+            mesh.updateWorldMatrix(true, false);
+            mesh.material = makeFinMat(wb.min.y, wb.max.y, mesh.matrixWorld.clone());
+          } else {
+            // Window frame assemblies: large laterally-offset meshes in the upper half → aluminium silver
+            const isWindowFrame = hRatio > 0.13 && lat > 0.60 && wc.y > rootCtr.y;
+            // Nose cone: centred mesh whose top touches the rocket tip
+            const isNoseCone = wc.y > rootCtr.y
+              && wb.max.y > rootBox.max.y - rootSize.y * 0.06
+              && lat < rootSize.x * 0.35
+              && hRatio < 0.50;
+
+            if (isWindowFrame) {
+              mesh.material = new THREE.MeshStandardMaterial({
+                color: 0xd0d8e0,
+                roughness: 0.02,
+                metalness: 1.0,
+                envMapIntensity: 6.0,
+              });
+            } else {
+              if (isNoseCone) mesh.layers.enable(1);
+              // Nose cone, nozzle, portholes — gloss black plastic
+              mesh.material = new THREE.MeshPhysicalMaterial({
+                color: 0x080808,
+                roughness: 0.05,
+                metalness: 0.0,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.03,
+                envMapIntensity: 0.5,
+              });
+            }
+          }
+        });
+      }
+
+      // ── Material assignment by (sanitised) mesh name ───────────────────
+      // GLTFLoader sanitises: spaces→underscore, removes non-word chars
+      function applyMaterials(root: THREE.Object3D) {
+        root.traverse((child) => {
+          const mesh = child as THREE.Mesh;
+          if (!mesh.isMesh) return;
+
+          const name = mesh.name;
+          if (name === "Main_fuselage")  { mesh.material = fuselageMat; return; }
+          if (name === "Cylinder")       { mesh.material = flameMat;    return; }
+          if (name === "Window")         { mesh.material = windowMat;   return; }
+          if (name === "Window_edge")    { mesh.material = edgeMat;     return; }
+          // Fins are unnamed meshes
+          mesh.material = finsMat;
+        });
+      }
+
+      // ── Load both GLBs in parallel ────────────────────────────────
+      const loader = new GLTFLoader();
+      let pivot: THREE.Group | null = null;
+      let spinGroup: THREE.Group | null = null;
+
+      const loadGLB = (url: string) =>
+        new Promise<any>((res, rej) => loader.load(url, res, undefined, rej));
+
+      Promise.all([loadGLB("/Orange_Rocket.glb"), loadGLB("/toy_rocket.glb")])
+        .then(([rocketGltf, flameGltf]) => {
+
+          // ── Rocket body ───────────────────────────────────────────
+          const rocketRoot = rocketGltf.scene as THREE.Group;
+
+          // Fit rocket to 4 scene units
+          const rb1   = new THREE.Box3().setFromObject(rocketRoot);
+          const rSize = rb1.getSize(new THREE.Vector3());
+          const rk    = 4.0 / Math.max(rSize.x, rSize.y, rSize.z);
+          rocketRoot.scale.multiplyScalar(rk);
+
+          // Centre rocket at origin
+          const rb2   = new THREE.Box3().setFromObject(rocketRoot);
+          const rCtr  = rb2.getCenter(new THREE.Vector3());
+          rocketRoot.position.sub(rCtr);
+
+          // Nozzle position = bottom of rocket bounding box
+          const rb3    = new THREE.Box3().setFromObject(rocketRoot);
+          const nozzleY = rb3.min.y;
+          console.log("[rocket] nozzleY:", nozzleY.toFixed(3));
+
+          // Replace texture on fuselage + fins — pass world Y range so gradient is consistent
+          customizeRocketMaterials(rocketRoot, rb3.min.y, rb3.max.y);
+
+          // ── Flame ─────────────────────────────────────────────────
+          const flameRoot = flameGltf.scene as THREE.Group;
+          flameRoot.updateWorldMatrix(false, true);
+
+          let flameGroup: THREE.Object3D | undefined;
+          flameRoot.traverse((c: THREE.Object3D) => { if (c.name === "Flame") flameGroup = c; });
+          if (!flameGroup) { console.error("Flame node not found"); return; }
+
+          // Strip parent transforms, keep world scale
+          const ws = new THREE.Vector3();
+          flameGroup.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), ws);
+          flameGroup.removeFromParent();
+          flameGroup.position.set(0, 0, 0);
+          flameGroup.quaternion.set(0, 0, 0, 1);
+          flameGroup.scale.copy(ws);
+
+          applyMaterials(flameGroup);
+
+          // Scale flame: height = 55% of rocket height, preserving aspect ratio
+          const fb1   = new THREE.Box3().setFromObject(flameGroup);
+          const fSize = fb1.getSize(new THREE.Vector3());
+          const fk    = (rSize.y * rk * 1.10) / fSize.y;
+          flameGroup.scale.multiplyScalar(fk);
+
+          // Centre flame in X/Z, then snap its top (nozzle end, dark-red, t=1) to nozzleY
+          const fb2  = new THREE.Box3().setFromObject(flameGroup);
+          const fCtr = fb2.getCenter(new THREE.Vector3());
+          flameGroup.position.x -= fCtr.x;
+          flameGroup.position.z -= fCtr.z;
+
+          const fb3 = new THREE.Box3().setFromObject(flameGroup);
+          // fb3.max.y is the top of flame — push it 0.35 units inside the nozzle
+          flameGroup.position.y += nozzleY - fb3.max.y + 0.35;
+
+          // ── Orange ring at nose-cone / fuselage junction ──────────
+          // Find the top of the fuselage mesh (tallest centred mesh) for exact placement
+          const rocketWidth  = rb3.max.x - rb3.min.x;
+          const rocketHeight = rb3.max.y - rb3.min.y;
+          const rocketCtrX   = (rb3.max.x + rb3.min.x) / 2;
+          const rocketCtrZ   = (rb3.max.z + rb3.min.z) / 2;
+          // Find the nose cone: centered mesh that reaches the rocket tip.
+          // Its min.y is the exact junction; its XZ width gives the exact ring radius.
+          let junctionY = rb3.min.y + rocketHeight * 0.78; // fallback
+          let junctionWidth = rocketWidth; // fallback
+          let bestNoseMinY = Infinity;
+          rocketRoot.traverse((c: THREE.Object3D) => {
+            const m = c as THREE.Mesh;
+            if (!m.isMesh) return;
+            const wb2 = new THREE.Box3().setFromObject(m);
+            const ws2 = wb2.getSize(new THREE.Vector3());
+            const wc2 = wb2.getCenter(new THREE.Vector3());
+            const lat2 = Math.sqrt((wc2.x - rocketCtrX) ** 2 + (wc2.z - rocketCtrZ) ** 2);
+            const hr2  = ws2.y / rocketHeight;
+            // Nose cone touches the rocket tip, is centred, and shorter than the fuselage
+            const touchesTip = wb2.max.y > rb3.max.y - rocketHeight * 0.06;
+            if (touchesTip && lat2 < rocketWidth * 0.35 && hr2 < 0.50 && wb2.min.y < bestNoseMinY) {
+              bestNoseMinY = wb2.min.y;
+              junctionY = wb2.min.y;
+              junctionWidth = Math.max(ws2.x, ws2.z); // width at the base of the nose cone
+              console.log(`[nose] ${c.name}  min.y:${wb2.min.y.toFixed(3)}  width:${junctionWidth.toFixed(3)}`);
+            }
+          });
+          const ringR = junctionWidth * 0.50;
+          // Rectangular cross-section ring: revolve a box profile around Y axis
+          const bandW  = ringR * 0.009;
+          const bandH  = ringR * 0.022;
+          const rIn    = ringR - bandW / 2;
+          const rOut   = ringR + bandW / 2;
+          const ringPts = [
+            new THREE.Vector2(rIn,  -bandH),
+            new THREE.Vector2(rOut, -bandH),
+            new THREE.Vector2(rOut,  bandH),
+            new THREE.Vector2(rIn,   bandH),
+            new THREE.Vector2(rIn,  -bandH),
+          ];
+          const jRing = new THREE.Mesh(
+            new THREE.LatheGeometry(ringPts, 64),
+            new THREE.MeshStandardMaterial({
+              color: 0xff5500,
+              roughness: 0.3,
+              metalness: 0.15,
+              emissive: new THREE.Color(0xff2200),
+              emissiveIntensity: 0.18,
+            })
+          );
+          jRing.position.y = junctionY;
+
+          // ── Pivot — tilt to match reference, float animation ──────
+          // spinGroup rotates around its local Y (= the rocket's own tilted axis)
+          // flameGroup is outside spinGroup so it stays directionally fixed
+          spinGroup = new THREE.Group();
+          spinGroup.add(rocketRoot);
+          spinGroup.add(jRing);
+
+          const tiltGroup = new THREE.Group();
+          tiltGroup.rotation.z = -0.32;
+          tiltGroup.add(spinGroup);
+          tiltGroup.add(flameGroup);
+
+          pivot = new THREE.Group();
+          pivot.add(tiltGroup);
+          scene.add(pivot);
+
+          wrap.classList.add("ready");
+        })
+        .catch((e: any) => console.error("GLB load error:", e));
+
+      // ── Render loop ───────────────────────────────────────────────────
+      const clock = new THREE.Clock();
+      let prevT = 0;
+      (function animate() {
+        requestAnimationFrame(animate);
+        const t = clock.getElapsedTime();
+        const dt = Math.min(t - prevT, 0.05);
+        prevT = t;
+
+        // Spring settle
+        // Ease offset back toward zero — no spring, no bounce
+        // Smoothly follow the target (slow drift away)
+        spring.ox += (spring.tx - spring.ox) * 0.025;
+        spring.oy += (spring.ty - spring.oy) * 0.025;
+        // Target itself slowly decays back to zero (slow return)
+        spring.tx *= 0.992;
+        spring.ty *= 0.992;
+
+        if (pivot) {
+          pivot.position.x = spring.ox;
+          pivot.position.y = Math.sin(t * 1.2) * 0.6 + spring.oy;
+        }
+        if (spinGroup) {
+          spinGroup.rotation.y += 0.02;
+        }
+
+        // Move particles along rocket's tilt axis (opposite direction = illusion of upward travel)
+        const pdx = -Math.sin(0.32) * 0.22;
+        const pdy = -Math.cos(0.32) * 0.22;
+        const pa = motionParticles.geometry.attributes.position.array as Float32Array;
+        for (let i = 0; i < PCNT; i++) {
+          pa[i * 3]     += pdx;
+          pa[i * 3 + 1] += pdy;
+          if (pa[i * 3 + 1] < -50) {
+            pa[i * 3]     = Math.random() * 80 - 20;
+            pa[i * 3 + 1] = 50;
+            pa[i * 3 + 2] = -(Math.random() * 20 + 2);
+          }
+        }
+        motionParticles.geometry.attributes.position.needsUpdate = true;
+
+        flameUniforms.time.value = t;
+        flameGlow.intensity = 5 + Math.sin(t * 9) * 1.2 + Math.sin(t * 14) * 0.6;
+        controls.update();
+        renderer.render(scene, camera);
+      })();
+
+      window.addEventListener("resize", () => {
+        camera.aspect = innerWidth / innerHeight;
+        camera.updateProjectionMatrix();
+        renderer.setSize(innerWidth, innerHeight);
+      });
+    </script>
+  </body>
+</html>
