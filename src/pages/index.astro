@@ -154,13 +154,13 @@
       scene.add(rimLight);
 
       // Nose highlight — layer 1 only, so it exclusively illuminates the nose cone mesh
-      const noseLight = new THREE.DirectionalLight(0xfffaf0, 3000.0);
+      const noseLight = new THREE.DirectionalLight(0xfffaf0, 800.0);
       noseLight.position.set(0, 10, 1);
       noseLight.layers.set(1);
       scene.add(noseLight);
 
-      // Purple accent — subtle colour fill so shadow side isn't cold grey
-      const fillLight = new THREE.DirectionalLight(0x8833ff, 0.6);
+      // Cool blue fill — subtle shadow-side fill on white body
+      const fillLight = new THREE.DirectionalLight(0x8899cc, 0.4);
       fillLight.position.set(-4, -1, 5);
       scene.add(fillLight);
 
@@ -220,13 +220,10 @@
           varying vec3 vNorm;
 
           vec3 grad(float t) {
-            // t = 0 (bottom / engine) → 1 (nose tip)
-            if (t < 0.18) return mix(vec3(0.85, 0.22, 0.05), vec3(0.90, 0.18, 0.42), t / 0.18);
-            if (t < 0.40) return mix(vec3(0.90, 0.18, 0.42), vec3(0.72, 0.06, 0.82), (t - 0.18) / 0.22);
-            if (t < 0.60) return mix(vec3(0.72, 0.06, 0.82), vec3(0.10, 0.32, 0.92), (t - 0.40) / 0.20);
-            if (t < 0.78) return mix(vec3(0.10, 0.32, 0.92), vec3(0.04, 0.10, 0.55), (t - 0.60) / 0.18);
-            if (t < 0.90) return mix(vec3(0.04, 0.10, 0.55), vec3(0.02, 0.02, 0.08), (t - 0.78) / 0.12);
-            return vec3(0.01, 0.005, 0.02);
+            // t = 0 (bottom / engine) → 1 (nose tip) — white body
+            if (t < 0.25) return mix(vec3(0.88, 0.86, 0.83), vec3(0.93, 0.92, 0.90), t / 0.25);
+            if (t < 0.75) return mix(vec3(0.93, 0.92, 0.90), vec3(0.97, 0.97, 0.96), (t - 0.25) / 0.50);
+            return mix(vec3(0.97, 0.97, 0.96), vec3(0.95, 0.94, 0.93), (t - 0.75) / 0.25);
           }
 
           void main() {
@@ -426,13 +423,13 @@
 
       // Solid PBR materials for the remaining parts
       const windowMat = new THREE.MeshStandardMaterial({
-        color: 0x1155cc, emissive: 0x061830, roughness: 0.3, metalness: 0,
+        color: 0x06080c, emissive: 0x000204, roughness: 0.08, metalness: 0.15,
       });
       const edgeMat = new THREE.MeshStandardMaterial({
         color: 0x111118, roughness: 0.85, metalness: 0,
       });
       const finsMat = new THREE.MeshStandardMaterial({
-        color: 0x28205a, roughness: 0.9, metalness: 0,
+        color: 0xcc1212, roughness: 0.45, metalness: 0,
       });
 
       // ── Fuselage / fins: near-mirror MeshStandardMaterial + gradient ─────
@@ -470,12 +467,10 @@ vGradT = clamp(rawT + sway, 0.0, 1.0);`);
             .replace('#include <common>', `#include <common>
 varying float vGradT;
 vec3 fuseGrad(float t){
-  if(t<0.50) return mix(vec3(0.04,0.50,1.00),vec3(0.16,0.08,0.98),t/0.50);
-  if(t<0.62) return mix(vec3(0.16,0.08,0.98),vec3(0.45,0.04,0.88),(t-0.50)/0.12);
-  if(t<0.73) return mix(vec3(0.45,0.04,0.88),vec3(0.80,0.06,0.22),(t-0.62)/0.11);
-  if(t<0.83) return mix(vec3(0.80,0.06,0.22),vec3(0.88,0.12,0.03),(t-0.73)/0.10);
-  if(t<0.92) return mix(vec3(0.88,0.12,0.03),vec3(0.85,0.25,0.04),(t-0.83)/0.09);
-  return     mix(vec3(0.85,0.25,0.04),vec3(0.80,0.35,0.06),(t-0.92)/0.08);
+  // White body — warm at engine end, clean bright white through the body
+  if(t<0.20) return mix(vec3(0.88,0.85,0.82),vec3(0.93,0.91,0.89),t/0.20);
+  if(t<0.80) return mix(vec3(0.93,0.91,0.89),vec3(0.97,0.97,0.96),(t-0.20)/0.60);
+  return     mix(vec3(0.97,0.97,0.96),vec3(0.95,0.94,0.93),(t-0.80)/0.20);
 }`)
             .replace('vec4 diffuseColor = vec4( diffuse, opacity );',
               `vec3 _gc = fuseGrad(vGradT);
@@ -509,9 +504,10 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
             varying float vT;
             varying vec3  vNorm;
             vec3 finGrad(float t) {
-              if(t<0.55) return mix(vec3(0.04,0.50,1.00), vec3(0.20,0.08,0.97), t/0.55);
-              if(t<0.78) return mix(vec3(0.20,0.08,0.97), vec3(0.58,0.04,0.84), (t-0.55)/0.23);
-              return mix(vec3(0.58,0.04,0.84), vec3(0.85,0.05,0.55), (t-0.78)/0.22);
+              // Bold red fins — brighter red at top, slightly deeper at base
+              if(t<0.50) return mix(vec3(0.68,0.04,0.03), vec3(0.82,0.07,0.05), t/0.50);
+              if(t<0.80) return mix(vec3(0.82,0.07,0.05), vec3(0.85,0.08,0.05), (t-0.50)/0.30);
+              return mix(vec3(0.85,0.08,0.05), vec3(0.80,0.06,0.04), (t-0.80)/0.20);
             }
             void main() {
               vec3 col = finGrad(vT);
@@ -519,7 +515,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
               float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
               float f   = max(dot(n, normalize(vec3(0.0,-1.0, 0.3))), 0.0) * 0.25;
               float rim = pow(1.0 - max(dot(n, vec3(0.0,0.0,1.0)), 0.0), 4.0) * 0.30;
-              col = col * (0.35 + d*0.65 + f) + rim * vec3(0.20,0.10,0.60);
+              col = col * (0.35 + d*0.65 + f) + rim * vec3(0.60,0.10,0.10);
               gl_FragColor = vec4(col, 1.0);
             }
           `,
@@ -577,9 +573,18 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
                 metalness: 1.0,
                 envMapIntensity: 6.0,
               });
+            } else if (isNoseCone) {
+              mesh.layers.enable(1);
+              mesh.material = new THREE.MeshPhysicalMaterial({
+                color: 0xcc1212,
+                roughness: 0.30,
+                metalness: 0.0,
+                clearcoat: 0.8,
+                clearcoatRoughness: 0.15,
+                envMapIntensity: 0.6,
+              });
             } else {
-              if (isNoseCone) mesh.layers.enable(1);
-              // Nose cone, nozzle, portholes — gloss black plastic
+              // Nozzle, portholes — gloss black
               mesh.material = new THREE.MeshPhysicalMaterial({
                 color: 0x080808,
                 roughness: 0.05,
@@ -728,11 +733,10 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
           const jRing = new THREE.Mesh(
             new THREE.LatheGeometry(ringPts, 64),
             new THREE.MeshStandardMaterial({
-              color: 0xff5500,
-              roughness: 0.3,
-              metalness: 0.15,
-              emissive: new THREE.Color(0xff2200),
-              emissiveIntensity: 0.18,
+              color: 0xc8cdd4,
+              roughness: 0.05,
+              metalness: 1.0,
+              envMapIntensity: 4.0,
             })
           );
           jRing.position.y = junctionY;
