@@ -481,6 +481,42 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
         return mat;
       }
 
+      // Ribbed chrome nozzle — horizontal banded rings like reference
+      function makeNozzleMat(yMin: number, yMax: number) {
+        const mat = new THREE.MeshPhysicalMaterial({
+          color: 0xcfc5ae,       // warm nickel/chrome
+          metalness: 0.94,
+          roughness: 0.10,
+          envMapIntensity: 4.0,
+        });
+        mat.customProgramCacheKey = () => `nozzle_${yMin.toFixed(2)}_${yMax.toFixed(2)}`;
+        mat.onBeforeCompile = (shader: any) => {
+          shader.uniforms.nozzYMin = { value: yMin };
+          shader.uniforms.nozzYMax = { value: yMax };
+          shader.vertexShader = shader.vertexShader
+            .replace('#include <common>', `#include <common>
+uniform float nozzYMin, nozzYMax;
+varying float vNozzT;`)
+            .replace('#include <begin_vertex>', `#include <begin_vertex>
+vNozzT = clamp((position.y - nozzYMin) / (nozzYMax - nozzYMin), 0.0, 1.0);`);
+          shader.fragmentShader = shader.fragmentShader
+            .replace('#include <common>', `#include <common>
+varying float vNozzT;`)
+            .replace('vec4 diffuseColor = vec4( diffuse, opacity );', `
+// Horizontal banded rings: smooth ridge → dark groove cycle
+float bt = fract(vNozzT * 10.0);
+float ridge = smoothstep(0.0, 0.30, bt) * smoothstep(1.0, 0.70, bt);
+// Warm chrome: ridges bright, grooves darker and slightly more golden
+vec3 ridgeCol  = vec3(0.88, 0.84, 0.76);
+vec3 grooveCol = vec3(0.38, 0.36, 0.32);
+vec3 nozzCol   = mix(grooveCol, ridgeCol, ridge);
+// Rough grooves, smooth ridges
+roughnessFactor = mix(0.45, 0.06, ridge);
+vec4 diffuseColor = vec4(nozzCol, opacity);`);
+        };
+        return mat;
+      }
+
       function makeFinMat(yMin: number, yMax: number, baseMx: THREE.Matrix4) {
         return new THREE.ShaderMaterial({
           uniforms: {
@@ -551,12 +587,19 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
             && hRatio < 0.55
             && maxLat > rootSize.x * 0.08;
 
+          // Nozzle: centred on axis, in lower half, shorter than fuselage
+          const isNozzle = wc.y < rootCtr.y
+            && lat < rootSize.x * 0.14
+            && hRatio < 0.28;
+
           if (isFuselage) {
             mesh.updateWorldMatrix(true, false);
             mesh.material = makeFuselageMat(worldYMin, worldYMax, mesh.matrixWorld.clone());
           } else if (isFin) {
             mesh.updateWorldMatrix(true, false);
             mesh.material = makeFinMat(wb.min.y, wb.max.y, mesh.matrixWorld.clone());
+          } else if (isNozzle) {
+            mesh.material = makeNozzleMat(wb.min.y, wb.max.y);
           } else {
             // Window frame assemblies: large laterally-offset meshes in the upper half → aluminium silver
             const isWindowFrame = hRatio > 0.13 && lat > 0.60 && wc.y > rootCtr.y;
@@ -584,7 +627,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
                 envMapIntensity: 0.6,
               });
             } else {
-              // Nozzle, portholes — gloss black
+              // Portholes and other small parts — gloss black
               mesh.material = new THREE.MeshPhysicalMaterial({
                 color: 0x080808,
                 roughness: 0.05,
