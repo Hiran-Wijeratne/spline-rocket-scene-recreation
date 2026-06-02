@@ -502,17 +502,15 @@ vNozzT = clamp((position.y - nozzYMin) / (nozzYMax - nozzYMin), 0.0, 1.0);`);
           shader.fragmentShader = shader.fragmentShader
             .replace('#include <common>', `#include <common>
 varying float vNozzT;`)
+            // Declare band vars early in main() so they're in scope for the roughness override below
             .replace('vec4 diffuseColor = vec4( diffuse, opacity );', `
-// Horizontal banded rings: smooth ridge → dark groove cycle
-float bt = fract(vNozzT * 10.0);
-float ridge = smoothstep(0.0, 0.30, bt) * smoothstep(1.0, 0.70, bt);
-// Warm chrome: ridges bright, grooves darker and slightly more golden
-vec3 ridgeCol  = vec3(0.88, 0.84, 0.76);
-vec3 grooveCol = vec3(0.38, 0.36, 0.32);
-vec3 nozzCol   = mix(grooveCol, ridgeCol, ridge);
-// Rough grooves, smooth ridges
-roughnessFactor = mix(0.45, 0.06, ridge);
-vec4 diffuseColor = vec4(nozzCol, opacity);`);
+float _nbt    = fract(vNozzT * 10.0);
+float _nridge = smoothstep(0.0, 0.30, _nbt) * smoothstep(1.0, 0.70, _nbt);
+vec3 _nozzCol = mix(vec3(0.38, 0.36, 0.32), vec3(0.88, 0.84, 0.76), _nridge);
+vec4 diffuseColor = vec4(_nozzCol, opacity);`)
+            // roughnessFactor is declared by this include — override it after
+            .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
+roughnessFactor = mix(0.45, 0.06, _nridge);`);
         };
         return mat;
       }
