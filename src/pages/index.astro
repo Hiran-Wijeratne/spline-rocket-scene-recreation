@@ -8,6 +8,9 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <title>Rocket Scene</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400&display=swap" rel="stylesheet">
     <style>
       *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
       html { background: #000; }
@@ -46,6 +49,72 @@
         color: rgba(255,255,255,0.35);
         text-transform: uppercase;
       }
+
+      /* ── Text overlay ───────────────────────────────────────────────── */
+      #overlay {
+        position: fixed; inset: 0;
+        z-index: 5;
+        pointer-events: none;
+        display: flex; flex-direction: column;
+        padding: 28px 48px 32px;
+        color: #fff;
+        opacity: 0; transition: opacity 1.0s ease 0.4s;
+      }
+      #overlay.visible { opacity: 1; }
+
+      .ov-nav {
+        display: flex; justify-content: space-between; align-items: center;
+        font-family: 'Inter', sans-serif;
+        font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+        color: rgba(255,255,255,0.45);
+      }
+      .ov-nav-links { display: flex; gap: 28px; }
+
+      .ov-hero {
+        flex: 1;
+        display: flex; align-items: center; gap: 48px;
+        padding-top: 8px;
+      }
+
+      .ov-headline {
+        font-family: 'Bebas Neue', sans-serif;
+        font-size: clamp(72px, 11vw, 148px);
+        line-height: 0.90;
+        letter-spacing: 0.03em;
+        text-transform: uppercase;
+        flex-shrink: 0;
+      }
+      .ov-headline .accent { color: #cc1212; }
+
+      .ov-side {
+        max-width: 240px;
+        display: flex; flex-direction: column; gap: 20px;
+        margin-left: auto;
+      }
+      .ov-side p {
+        font-family: 'Inter', sans-serif;
+        font-size: 12.5px; line-height: 1.65; font-weight: 300;
+        color: rgba(255,255,255,0.60);
+      }
+      .ov-btn {
+        pointer-events: auto;
+        align-self: flex-start;
+        padding: 9px 22px;
+        border: 1px solid rgba(255,255,255,0.35);
+        background: transparent; color: #fff; cursor: pointer;
+        font-family: 'Inter', sans-serif;
+        font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
+        transition: background 0.2s, border-color 0.2s;
+      }
+      .ov-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.7); }
+
+      .ov-footer {
+        display: flex; justify-content: space-between; align-items: flex-end;
+        font-family: 'Inter', sans-serif;
+        font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
+        color: rgba(255,255,255,0.30);
+      }
+      .ov-footer-links { display: flex; gap: 28px; }
     </style>
   </head>
   <body>
@@ -55,11 +124,43 @@
     </div>
     <div id="c"><canvas id="cv"></canvas></div>
 
+    <div id="overlay">
+      <nav class="ov-nav">
+        <span>Fly Rocket Media</span>
+        <div class="ov-nav-links">
+          <span>Work</span>
+          <span>Services</span>
+          <span>About</span>
+          <span>Contact</span>
+        </div>
+      </nav>
+
+      <div class="ov-hero">
+        <div class="ov-headline">
+          FLY<br>
+          ROCKET<br>
+          <span class="accent">MEDIA.</span>
+        </div>
+        <div class="ov-side">
+          <p>A futuristic fuel studio building websites, brand systems, SEO, and social media campaigns to fuel growth in platforms. No PPC needed — engineer your win.</p>
+          <button class="ov-btn">Get Started</button>
+        </div>
+      </div>
+
+      <footer class="ov-footer">
+        <span>© 2024 Fly Rocket Media</span>
+        <div class="ov-footer-links">
+          <span>Explore</span>
+          <span>Portfolio</span>
+          <span>Contact</span>
+        </div>
+      </footer>
+    </div>
+
     <script>
       import * as THREE from "three";
       import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
       import { OrbitControls } from "three/addons/controls/OrbitControls.js";
-      import { RGBELoader } from "three/addons/loaders/RGBELoader.js";
 
       const wrap      = document.getElementById("c")!;
       const canvas    = document.getElementById("cv") as HTMLCanvasElement;
@@ -74,8 +175,81 @@
       }
       function hideLoader() {
         loaderBar.style.width = '100%';
-        setTimeout(() => loaderEl.classList.add('hidden'), 300);
+        setTimeout(() => {
+          loaderEl.classList.add('hidden');
+          document.getElementById('overlay')!.classList.add('visible');
+        }, 300);
       }
+
+      // ── Space background ─────────────────────────────────────────────────
+      // Large inside-out sphere with the image tiled twice (front + back).
+      // repeat(2, 1) halves the horizontal stretch so the image fills each
+      // hemisphere at its natural aspect ratio instead of being pulled to 360°.
+      const texLoader = new THREE.TextureLoader();
+      texLoader.load('/space-bg.jpg', (tex) => {
+        tex.colorSpace = THREE.SRGBColorSpace;
+        tex.wrapS = THREE.RepeatWrapping;
+        tex.wrapT = THREE.RepeatWrapping;
+        const skyMesh = new THREE.Mesh(
+          new THREE.SphereGeometry(500, 64, 40),
+          new THREE.ShaderMaterial({
+            uniforms: { map: { value: tex } },
+            side: THREE.BackSide,
+            vertexShader: /* glsl */`
+              varying vec2 vUv;
+              void main() {
+                vUv = uv;
+                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+              }
+            `,
+            fragmentShader: /* glsl */`
+              uniform sampler2D map;
+              varying vec2 vUv;
+
+              float hash(vec2 p) {
+                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
+              }
+              float noise(vec2 p) {
+                vec2 i = floor(p);
+                vec2 f = fract(p);
+                f = f * f * (3.0 - 2.0 * f);
+                return mix(
+                  mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
+                  mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
+                  f.y
+                );
+              }
+
+              void main() {
+                vec3 tint = vec3(0.80, 0.70, 0.78);
+                vec4 col;
+
+                if (vUv.x <= 0.5) {
+                  // Front hemisphere (behind rocket): one clean full image
+                  col = texture2D(map, vec2(vUv.x * 2.0, vUv.y));
+                } else {
+                  // Back hemisphere: tiled + noise-warped fill
+                  vec2 uv = vec2((vUv.x - 0.5) * 2.0, vUv.y) * vec2(3.0, 2.0);
+                  float w = 0.55;
+                  vec2 warp = vec2(
+                    noise(uv * 0.5 + vec2(0.0, 7.3)),
+                    noise(uv * 0.5 + vec2(5.1, 0.0))
+                  ) * w - w * 0.5;
+                  col = texture2D(map, fract(uv + warp));
+                }
+
+                // Desaturate and dim so the sky recedes into the background
+                float lum = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
+                col.rgb = mix(vec3(lum), col.rgb, 0.35);
+                col.rgb *= tint * 0.55;
+                gl_FragColor = col;
+              }
+            `,
+          })
+        );
+        skyMesh.rotation.y = Math.PI;
+        scene.add(skyMesh);
+      });
 
       // ── Renderer ──────────────────────────────────────────────────────────
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
@@ -84,24 +258,6 @@
       renderer.outputColorSpace = THREE.SRGBColorSpace;
       renderer.toneMapping = THREE.ACESFilmicToneMapping;
       renderer.toneMappingExposure = 2.0;
-
-      // Studio HDR for IBL reflections, galaxy jpg for visible background
-      const pmremGenerator = new THREE.PMREMGenerator(renderer);
-      pmremGenerator.compileEquirectangularShader();
-
-      // Load studio HDR → environment only (reflections)
-      new RGBELoader().load('/studion light 4k.hdr', (hdrTex) => {
-        const envMap = pmremGenerator.fromEquirectangular(hdrTex).texture;
-        scene.environment = envMap;
-        hdrTex.dispose();
-        pmremGenerator.dispose();
-      });
-
-      // Galaxy jpg → background only (visible backdrop stays dark space)
-      new THREE.TextureLoader().load('/dark-galaxy-background.jpg', (tex) => {
-        tex.mapping = THREE.EquirectangularReflectionMapping;
-        scene.background = tex;
-      });
 
       // ── Scene / camera ────────────────────────────────────────────────────
       const scene  = new THREE.Scene();
@@ -117,6 +273,14 @@
       controls.zoomSpeed = 1.2;
       controls.minDistance = 1;
       controls.maxDistance = 500;
+
+      // ── Mouse tilt ───────────────────────────────────────────────────
+      // Cursor position mapped to -1…1; smoothed each frame toward pivot rotation
+      const mouseTilt = { x: 0, y: 0, tx: 0, ty: 0 };
+      window.addEventListener('mousemove', (e) => {
+        mouseTilt.tx = (e.clientX / window.innerWidth  - 0.5) * 2;
+        mouseTilt.ty = (e.clientY / window.innerHeight - 0.5) * 2;
+      });
 
       // ── Click-to-jump spring ──────────────────────────────────────────
       const spring = { ox: 0, oy: 0, tx: 0, ty: 0 };
@@ -138,36 +302,40 @@
 
       // ── Cinematic lighting ────────────────────────────────────────────
 
+      // Static back fill — fixed at the initial rim position, never moves
+      const staticBackLight = new THREE.DirectionalLight(0xffffff, 0.8);
+      staticBackLight.position.set(0, 0, -10);
+      scene.add(staticBackLight);
+
       // Right key — warm white, dominant, creates main hot reflection on right face
-      const keyLight = new THREE.DirectionalLight(0xfff8e8, 2.0);
-      keyLight.position.set(5, 3, 5);
+      const keyLight = new THREE.DirectionalLight(0xfff8e8, 1.2);
+      keyLight.position.set(-5, 3, 5);
       scene.add(keyLight);
 
-      // Right back — warm orange, creates second specular streak on back-right edge
-      const rightBackFill = new THREE.DirectionalLight(0xff8833, 1.2);
-      rightBackFill.position.set(6, 1, -7);
-      scene.add(rightBackFill);
 
       // Rim — deep blue from behind, cuts sharp silhouette edge
-      const rimLight = new THREE.DirectionalLight(0x2255ff, 18.0);
-      rimLight.position.set(-1, 4, -10);
+      const rimLight = new THREE.DirectionalLight(0x2255ff, 600.0);
+      rimLight.position.set(0, 0, -10);
       scene.add(rimLight);
 
-      // Nose highlight — layer 1 only, so it exclusively illuminates the nose cone mesh
-      const noseLight = new THREE.DirectionalLight(0xfffaf0, 800.0);
-      noseLight.position.set(0, 10, 1);
-      noseLight.layers.set(1);
-      scene.add(noseLight);
-
       // Cool blue fill — subtle shadow-side fill on white body
-      const fillLight = new THREE.DirectionalLight(0x8899cc, 0.4);
-      fillLight.position.set(-4, -1, 5);
+      const fillLight = new THREE.DirectionalLight(0xfff3d0, 0.7);
+      fillLight.position.set(4, -1, 5);
       scene.add(fillLight);
 
       // Flame glow — orange point light below nozzle, flickers in render loop
       const flameGlow = new THREE.PointLight(0xff6600, 3, 14);
       flameGlow.position.set(0, -2.5, 0.5);
       scene.add(flameGlow);
+
+      // Nozzle interior — positioned dynamically at nozzle center after GLB loads, added to spinGroup
+      const nozzleInteriorLight = new THREE.SpotLight(0xffee77, 20, 8, Math.PI / 3, 0.2);
+
+      // Nozzle — 2 SpotLights (east + west only), positions set dynamically after GLB loads
+      const nozzleLights = [0, 1].map(() => new THREE.SpotLight(0xfff0aa, 10, 5, Math.PI / 12, 0.1));
+
+      // Window ring — close-range point light positioned right at the window area
+      const windowLight = new THREE.SpotLight(0x1a2a7e, 1.5, 5, Math.PI / 14, 0.15);
 
       // ── Stars ──────────────────────────────────────────────────────────
       (() => {
@@ -185,18 +353,54 @@
       })();
 
       // ── Motion particles — streaks falling at rocket's tilt angle ────
-      const PCNT = 6;
-      const pPos = new Float32Array(PCNT * 3);
+      const PCNT = 55;
+      const pPos   = new Float32Array(PCNT * 3);
+      const pSizes = new Float32Array(PCNT);
       for (let i = 0; i < PCNT; i++) {
-        pPos[i * 3]     = Math.random() * 80 - 20;  // -20 to +60, wide & right-biased
+        pPos[i * 3]     = Math.random() * 80 - 20;
         pPos[i * 3 + 1] = (Math.random() - 0.5) * 100;
         pPos[i * 3 + 2] = -(Math.random() * 20 + 2);
+        pSizes[i] = 0.18 + Math.random() * 0.45; // 0.18 – 0.63 scene units
       }
       const pGeo = new THREE.BufferGeometry();
       pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-      const pMat = new THREE.PointsMaterial({
-        color: 0x88bbff, size: 0.58, sizeAttenuation: true,
-        transparent: true, opacity: 1.0,
+      pGeo.setAttribute('aSize',    new THREE.BufferAttribute(pSizes, 1));
+
+      // Soft circular particle texture
+      const _pc = document.createElement('canvas');
+      _pc.width = 64; _pc.height = 64;
+      const _px = _pc.getContext('2d')!;
+      const _pg = _px.createRadialGradient(32, 32, 0, 32, 32, 32);
+      _pg.addColorStop(0,   'rgba(255,255,255,1)');
+      _pg.addColorStop(0.4, 'rgba(255,255,255,0.8)');
+      _pg.addColorStop(1,   'rgba(255,255,255,0)');
+      _px.fillStyle = _pg;
+      _px.beginPath(); _px.arc(32, 32, 32, 0, Math.PI * 2); _px.fill();
+
+      const pMat = new THREE.ShaderMaterial({
+        uniforms: {
+          map:     { value: new THREE.CanvasTexture(_pc) },
+          uViewH:  { value: window.innerHeight },
+        },
+        vertexShader: /* glsl */`
+          attribute float aSize;
+          uniform float uViewH;
+          void main() {
+            vec4 mv = modelViewMatrix * vec4(position, 1.0);
+            gl_PointSize = aSize * projectionMatrix[1][1] * uViewH * 0.5 / (-mv.z);
+            gl_Position  = projectionMatrix * mv;
+          }
+        `,
+        fragmentShader: /* glsl */`
+          uniform sampler2D map;
+          void main() {
+            vec4 tex = texture2D(map, gl_PointCoord);
+            if (tex.a < 0.01) discard;
+            gl_FragColor = vec4(0.533, 0.733, 1.0, tex.a);
+          }
+        `,
+        transparent: true,
+        depthWrite:  false,
       });
       const motionParticles = new THREE.Points(pGeo, pMat);
       scene.add(motionParticles);
@@ -209,18 +413,20 @@
         vertexShader: /* glsl */`
           varying vec3 vPos;
           varying vec3 vNorm;
+          varying vec3 vWorldPos;
           void main() {
-            vPos  = position;
-            vNorm = normalMatrix * normal;
+            vPos      = position;
+            vNorm     = normalMatrix * normal;
+            vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
             gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
           }
         `,
         fragmentShader: /* glsl */`
           varying vec3 vPos;
           varying vec3 vNorm;
+          varying vec3 vWorldPos;
 
           vec3 grad(float t) {
-            // t = 0 (bottom / engine) → 1 (nose tip) — white body
             if (t < 0.25) return mix(vec3(0.88, 0.86, 0.83), vec3(0.93, 0.92, 0.90), t / 0.25);
             if (t < 0.75) return mix(vec3(0.93, 0.92, 0.90), vec3(0.97, 0.97, 0.96), (t - 0.25) / 0.50);
             return mix(vec3(0.97, 0.97, 0.96), vec3(0.95, 0.94, 0.93), (t - 0.75) / 0.25);
@@ -229,16 +435,19 @@
           void main() {
             float t   = clamp((vPos.y + 219.7) / 447.4, 0.0, 1.0);
             vec3  col = grad(t);
-
             vec3  n   = normalize(vNorm);
-            // Key light
-            float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
-            // Warm fill from below
-            float f   = max(dot(n, normalize(vec3(0.0, -1.0, 0.3))), 0.0) * 0.25;
-            // Rim
-            float rim = pow(1.0 - max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0), 4.0) * 0.35;
 
+            float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
+            float f   = max(dot(n, normalize(vec3(0.0, -1.0, 0.3))), 0.0) * 0.25;
+            float rim = pow(1.0 - max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0), 4.0) * 0.35;
             col = col * (0.35 + d * 0.65 + f) + rim * vec3(0.25, 0.15, 0.70);
+
+            // Gloss specular
+            vec3 viewDir = normalize(cameraPosition - vWorldPos);
+            vec3 halfVec = normalize(viewDir + normalize(vec3(0.4, 0.8, 1.0)));
+            float spec   = pow(max(dot(n, halfVec), 0.0), 512.0);
+            col += vec3(1.0) * spec * 1.2;
+
             gl_FragColor = vec4(col, 1.0);
           }
         `,
@@ -429,11 +638,11 @@
         color: 0x111118, roughness: 0.85, metalness: 0,
       });
       const finsMat = new THREE.MeshStandardMaterial({
-        color: 0xcc1212, roughness: 0.45, metalness: 0,
+        color: 0xa5271d, roughness: 0.45, metalness: 0,
       });
 
       // ── Fuselage / fins: near-mirror MeshStandardMaterial + gradient ─────
-      // metalness≈1, roughness≈0 → galaxy env map reflects across the surface.
+      // metalness≈1, roughness≈0 → studio HDR reflects across the surface.
       // onBeforeCompile injects the gradient colour into the PBR diffuse slot
       // so the gradient tints the reflections rather than replacing them.
 
@@ -481,38 +690,16 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
         return mat;
       }
 
-      // Ribbed chrome nozzle — horizontal banded rings like reference
-      function makeNozzleMat(yMin: number, yMax: number) {
-        const mat = new THREE.MeshPhysicalMaterial({
-          color: 0xcfc5ae,       // warm nickel/chrome
-          metalness: 0.94,
-          roughness: 0.10,
-          envMapIntensity: 4.0,
+      // Plain mirror silver nozzle
+      function makeNozzleMat(_yMin: number, _yMax: number) {
+        return new THREE.MeshPhysicalMaterial({
+          color: 0xd4d8dc,
+          metalness: 0.9,
+          roughness: 0.15,
+          envMapIntensity: 16.0,
+          clearcoat: 1.0,
+          clearcoatRoughness: 0.0,
         });
-        mat.customProgramCacheKey = () => `nozzle_${yMin.toFixed(2)}_${yMax.toFixed(2)}`;
-        mat.onBeforeCompile = (shader: any) => {
-          shader.uniforms.nozzYMin = { value: yMin };
-          shader.uniforms.nozzYMax = { value: yMax };
-          shader.vertexShader = shader.vertexShader
-            .replace('#include <common>', `#include <common>
-uniform float nozzYMin, nozzYMax;
-varying float vNozzT;`)
-            .replace('#include <begin_vertex>', `#include <begin_vertex>
-vNozzT = clamp((position.y - nozzYMin) / (nozzYMax - nozzYMin), 0.0, 1.0);`);
-          shader.fragmentShader = shader.fragmentShader
-            .replace('#include <common>', `#include <common>
-varying float vNozzT;`)
-            // Declare band vars early in main() so they're in scope for the roughness override below
-            .replace('vec4 diffuseColor = vec4( diffuse, opacity );', `
-float _nbt    = fract(vNozzT * 10.0);
-float _nridge = smoothstep(0.0, 0.30, _nbt) * smoothstep(1.0, 0.70, _nbt);
-vec3 _nozzCol = mix(vec3(0.38, 0.36, 0.32), vec3(0.88, 0.84, 0.76), _nridge);
-vec4 diffuseColor = vec4(_nozzCol, opacity);`)
-            // roughnessFactor is declared by this include — override it after
-            .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-roughnessFactor = mix(0.45, 0.06, _nridge);`);
-        };
-        return mat;
       }
 
       function makeFinMat(yMin: number, yMax: number, baseMx: THREE.Matrix4) {
@@ -527,21 +714,23 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
             uniform mat4  baseMx;
             varying float vT;
             varying vec3  vNorm;
+            varying vec3  vWorldPos;
             void main() {
               float preY = (baseMx * vec4(position, 1.0)).y;
-              vT    = clamp((preY - yMin) / (yMax - yMin), 0.0, 1.0);
-              vNorm = normalMatrix * normal;
+              vT       = clamp((preY - yMin) / (yMax - yMin), 0.0, 1.0);
+              vNorm    = normalMatrix * normal;
+              vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
               gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
             }
           `,
           fragmentShader: /* glsl */`
             varying float vT;
             varying vec3  vNorm;
+            varying vec3  vWorldPos;
             vec3 finGrad(float t) {
-              // Bold red fins — brighter red at top, slightly deeper at base
-              if(t<0.50) return mix(vec3(0.68,0.04,0.03), vec3(0.82,0.07,0.05), t/0.50);
-              if(t<0.80) return mix(vec3(0.82,0.07,0.05), vec3(0.85,0.08,0.05), (t-0.50)/0.30);
-              return mix(vec3(0.85,0.08,0.05), vec3(0.80,0.06,0.04), (t-0.80)/0.20);
+              // bottom: bright #cc1212, top: dark #a5271d — high contrast
+              if(t<0.50) return mix(vec3(1.00,0.07,0.07), vec3(0.80,0.08,0.07), t/0.50);
+              return mix(vec3(0.80,0.08,0.07), vec3(0.42,0.10,0.07), (t-0.50)/0.50);
             }
             void main() {
               vec3 col = finGrad(vT);
@@ -550,6 +739,13 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
               float f   = max(dot(n, normalize(vec3(0.0,-1.0, 0.3))), 0.0) * 0.25;
               float rim = pow(1.0 - max(dot(n, vec3(0.0,0.0,1.0)), 0.0), 4.0) * 0.30;
               col = col * (0.35 + d*0.65 + f) + rim * vec3(0.60,0.10,0.10);
+
+              // Gloss specular
+              vec3 viewDir = normalize(cameraPosition - vWorldPos);
+              vec3 halfVec = normalize(viewDir + normalize(vec3(0.4, 0.8, 1.0)));
+              float spec   = pow(max(dot(n, halfVec), 0.0), 512.0);
+              col += vec3(1.0) * spec * 1.2;
+
               gl_FragColor = vec4(col, 1.0);
             }
           `,
@@ -559,7 +755,11 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
       // ── Strip texture from rocket fuselage + fins ─────────────────────
       function customizeRocketMaterials(
         root: THREE.Object3D, worldYMin: number, worldYMax: number
-      ) {
+      ): { window: { center: THREE.Vector3; size: THREE.Vector3 } | null; nozzle: { center: THREE.Vector3; size: THREE.Vector3 } | null } {
+        let windowCenter: THREE.Vector3 | null = null;
+        let windowSize: THREE.Vector3 | null = null;
+        let nozzleCenter: THREE.Vector3 | null = null;
+        let nozzleSize: THREE.Vector3 | null = null;
         const rootBox  = new THREE.Box3().setFromObject(root);
         const rootSize = rootBox.getSize(new THREE.Vector3());
         const rootCtr  = rootBox.getCenter(new THREE.Vector3());
@@ -597,6 +797,8 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
             mesh.updateWorldMatrix(true, false);
             mesh.material = makeFinMat(wb.min.y, wb.max.y, mesh.matrixWorld.clone());
           } else if (isNozzle) {
+            nozzleCenter = wc.clone();
+            nozzleSize = ws.clone();
             mesh.material = makeNozzleMat(wb.min.y, wb.max.y);
           } else {
             // Window frame assemblies: large laterally-offset meshes in the upper half → aluminium silver
@@ -608,35 +810,50 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
               && hRatio < 0.50;
 
             if (isWindowFrame) {
-              mesh.material = new THREE.MeshStandardMaterial({
-                color: 0xd0d8e0,
-                roughness: 0.02,
-                metalness: 1.0,
-                envMapIntensity: 6.0,
+              windowCenter = wc.clone();
+              windowSize = ws.clone();
+              mesh.material = new THREE.MeshPhysicalMaterial({
+                color: 0xff5500,
+                roughness: 0.05,
+                metalness: 0.7,
+                envMapIntensity: 12.0,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.0,
               });
             } else if (isNoseCone) {
               mesh.layers.enable(1);
               mesh.material = new THREE.MeshPhysicalMaterial({
-                color: 0xcc1212,
-                roughness: 0.30,
-                metalness: 0.0,
-                clearcoat: 0.8,
-                clearcoatRoughness: 0.15,
-                envMapIntensity: 0.6,
-              });
-            } else {
-              // Portholes and other small parts — gloss black
-              mesh.material = new THREE.MeshPhysicalMaterial({
-                color: 0x080808,
-                roughness: 0.05,
+                color: 0xa5271d,
+                roughness: 0.0,
                 metalness: 0.0,
                 clearcoat: 1.0,
-                clearcoatRoughness: 0.03,
-                envMapIntensity: 0.5,
+                clearcoatRoughness: 0.0,
+                envMapIntensity: 2.0,
+              });
+            } else {
+              // Portholes — real glass: transmission + IOR, no textures
+              mesh.material = new THREE.MeshPhysicalMaterial({
+                color: 0x0f1f5c,
+                transmission: 1.0,
+                transparent: true,
+                roughness: 0.0,
+                metalness: 0.0,
+                ior: 1.5,
+                thickness: 1.0,
+                attenuationColor: new THREE.Color(0x0a1845),
+                attenuationDistance: 0.4,
+                clearcoat: 1.0,
+                clearcoatRoughness: 0.0,
+                envMapIntensity: 1.5,
+                side: THREE.DoubleSide,
               });
             }
           }
         });
+        return {
+          window: windowCenter && windowSize ? { center: windowCenter, size: windowSize } : null,
+          nozzle: nozzleCenter && nozzleSize ? { center: nozzleCenter, size: nozzleSize } : null,
+        };
       }
 
       // ── Material assignment by (sanitised) mesh name ───────────────────
@@ -691,10 +908,9 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
           // Nozzle position = bottom of rocket bounding box
           const rb3    = new THREE.Box3().setFromObject(rocketRoot);
           const nozzleY = rb3.min.y;
-          console.log("[rocket] nozzleY:", nozzleY.toFixed(3));
 
           // Replace texture on fuselage + fins — pass world Y range so gradient is consistent
-          customizeRocketMaterials(rocketRoot, rb3.min.y, rb3.max.y);
+          const windowInfo = customizeRocketMaterials(rocketRoot, rb3.min.y, rb3.max.y);
 
           // ── Flame ─────────────────────────────────────────────────
           const flameRoot = flameGltf.scene as THREE.Group;
@@ -749,13 +965,11 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
             const wc2 = wb2.getCenter(new THREE.Vector3());
             const lat2 = Math.sqrt((wc2.x - rocketCtrX) ** 2 + (wc2.z - rocketCtrZ) ** 2);
             const hr2  = ws2.y / rocketHeight;
-            // Nose cone touches the rocket tip, is centred, and shorter than the fuselage
             const touchesTip = wb2.max.y > rb3.max.y - rocketHeight * 0.06;
             if (touchesTip && lat2 < rocketWidth * 0.35 && hr2 < 0.50 && wb2.min.y < bestNoseMinY) {
               bestNoseMinY = wb2.min.y;
               junctionY = wb2.min.y;
-              junctionWidth = Math.max(ws2.x, ws2.z); // width at the base of the nose cone
-              console.log(`[nose] ${c.name}  min.y:${wb2.min.y.toFixed(3)}  width:${junctionWidth.toFixed(3)}`);
+              junctionWidth = Math.max(ws2.x, ws2.z);
             }
           });
           const ringR = junctionWidth * 0.50;
@@ -788,6 +1002,52 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
           spinGroup = new THREE.Group();
           spinGroup.add(rocketRoot);
           spinGroup.add(jRing);
+          spinGroup.add(windowLight);
+          spinGroup.add(windowLight.target);
+          nozzleLights.forEach(l => { spinGroup.add(l); spinGroup.add(l.target); });
+          spinGroup.add(nozzleInteriorLight);
+          spinGroup.add(nozzleInteriorLight.target);
+
+          if (windowInfo.window) {
+            const { center, size } = windowInfo.window;
+            const dir = new THREE.Vector3(center.x, 0, center.z).normalize();
+            windowLight.position.copy(center).addScaledVector(dir, -0.4);
+            windowLight.target.position.copy(center).addScaledVector(dir, 3.0);
+            const windowRadius = Math.max(size.x, size.z) * 0.5;
+            windowLight.angle = Math.atan2(windowRadius, 3.4);
+            windowLight.penumbra = 0.08;
+          }
+
+          {
+            // Use classified nozzle mesh if found, otherwise fall back to bottom of rocket bounding box
+            const nozzleInfo = windowInfo.nozzle;
+            const nozzleY   = nozzleInfo ? nozzleInfo.center.y : rb3.min.y + (rb3.max.y - rb3.min.y) * 0.08;
+            const nozzleR   = nozzleInfo ? Math.max(nozzleInfo.size.x, nozzleInfo.size.z) * 0.5 : (rb3.max.x - rb3.min.x) * 0.12;
+            const nozzleH   = nozzleInfo ? nozzleInfo.size.y : (rb3.max.y - rb3.min.y) * 0.15;
+            const cx        = nozzleInfo ? nozzleInfo.center.x : 0;
+            const cz        = nozzleInfo ? nozzleInfo.center.z : 0;
+;
+
+            const dist      = nozzleR * 2.5;
+            const halfH     = nozzleH * 0.5;
+            const topY      = nozzleY + halfH;
+            const angle     = Math.atan2(Math.max(nozzleR, halfH), dist);
+            const dirs = [
+              new THREE.Vector3( dist, 0, 0),  // east
+              new THREE.Vector3(-dist, 0, 0),  // west
+            ];
+            nozzleLights.forEach((l, i) => {
+              l.position.set(cx + dirs[i].x, nozzleY - halfH, cz + dirs[i].z);
+              l.target.position.set(cx, topY, cz);
+              l.angle   = angle;
+              l.penumbra = 0.1;
+            });
+
+            // Interior upward light — below nozzle opening, fires straight up into the throat
+            nozzleInteriorLight.position.set(cx, nozzleY - halfH - 0.45, cz);
+            nozzleInteriorLight.target.position.set(cx, nozzleY + nozzleH * 2, cz);
+
+          }
 
           const tiltGroup = new THREE.Group();
           tiltGroup.rotation.z = -0.32;
@@ -821,9 +1081,15 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
         spring.tx *= 0.992;
         spring.ty *= 0.992;
 
+        // Smooth mouse tilt
+        mouseTilt.x += (mouseTilt.tx - mouseTilt.x) * 0.04;
+        mouseTilt.y += (mouseTilt.ty - mouseTilt.y) * 0.04;
+
         if (pivot) {
           pivot.position.x = spring.ox;
           pivot.position.y = Math.sin(t * 1.2) * 0.6 + spring.oy;
+          pivot.rotation.z =  mouseTilt.x * -0.25;
+          pivot.rotation.x =  mouseTilt.y *  0.18;
         }
         if (spinGroup) {
           spinGroup.rotation.y += 0.02;
@@ -846,6 +1112,12 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
 
         flameUniforms.time.value = t;
         flameGlow.intensity = 5 + Math.sin(t * 9) * 1.2 + Math.sin(t * 14) * 0.6;
+
+        // Dynamic rim light — always directly behind the object from the camera's view
+        const _behindDir = controls.target.clone().sub(camera.position).normalize();
+        rimLight.position.copy(controls.target).addScaledVector(_behindDir, 10);
+
+
         controls.update();
         renderer.render(scene, camera);
       })();
@@ -854,6 +1126,7 @@ roughnessFactor = mix(0.45, 0.06, _nridge);`);
         camera.aspect = innerWidth / innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
+        pMat.uniforms.uViewH.value = innerHeight;
       });
     </script>
   </body>
