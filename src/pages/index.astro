@@ -274,12 +274,25 @@
       controls.minDistance = 1;
       controls.maxDistance = 500;
 
-      // ── Mouse tilt ───────────────────────────────────────────────────
-      // Cursor position mapped to -1…1; smoothed each frame toward pivot rotation
+      // ── Mouse tilt + spin boost ───────────────────────────────────────
+      // Cursor position mapped to -1…1; smoothed each frame toward pivot rotation.
+      // Mouse velocity adds a temporary spin boost that decays back to base speed.
       const mouseTilt = { x: 0, y: 0, tx: 0, ty: 0 };
+      let spinBoost = 0;
+      let _prevMx = 0, _prevMy = 0;
+      let _prevSide = 0; // -1 = left half, 1 = right half
       window.addEventListener('mousemove', (e) => {
         mouseTilt.tx = (e.clientX / window.innerWidth  - 0.5) * 2;
         mouseTilt.ty = (e.clientY / window.innerHeight - 0.5) * 2;
+        const dx = e.clientX - _prevMx;
+        const dy = e.clientY - _prevMy;
+        spinBoost = Math.min(spinBoost + Math.sqrt(dx*dx + dy*dy) * 0.0004, 0.07);
+        _prevMx = e.clientX; _prevMy = e.clientY;
+
+        // Upward nudge each time cursor crosses the horizontal centre
+        const side = e.clientX < window.innerWidth / 2 ? -1 : 1;
+        if (_prevSide !== 0 && side !== _prevSide) spring.ty += 1.6;
+        _prevSide = side;
       });
 
       // ── Click-to-jump spring ──────────────────────────────────────────
@@ -396,7 +409,7 @@
           void main() {
             vec4 tex = texture2D(map, gl_PointCoord);
             if (tex.a < 0.01) discard;
-            gl_FragColor = vec4(0.533, 0.733, 1.0, tex.a);
+            gl_FragColor = vec4(1.0, 0.82, 0.66, tex.a);
           }
         `,
         transparent: true,
@@ -1092,7 +1105,8 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
           pivot.rotation.x =  mouseTilt.y *  0.18;
         }
         if (spinGroup) {
-          spinGroup.rotation.y += 0.02;
+          spinBoost *= 0.975; // decay back to zero
+          spinGroup.rotation.y += 0.02 + spinBoost;
         }
 
         // Move particles along rocket's tilt axis (opposite direction = illusion of upward travel)
