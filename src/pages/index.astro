@@ -8,10 +8,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="generator" content={Astro.generator} />
     <title>Rocket Scene</title>
-    <link rel="preconnect" href="https://fonts.googleapis.com">
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@300;400&display=swap" rel="stylesheet">
-    <style>
+<style>
       *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
       html { background: #000; }
       body { width: 100%; min-height: 100vh; background: #000; }
@@ -50,71 +47,6 @@
         text-transform: uppercase;
       }
 
-      /* ── Text overlay ───────────────────────────────────────────────── */
-      #overlay {
-        position: fixed; inset: 0;
-        z-index: 5;
-        pointer-events: none;
-        display: flex; flex-direction: column;
-        padding: 28px 48px 32px;
-        color: #fff;
-        opacity: 0; transition: opacity 1.0s ease 0.4s;
-      }
-      #overlay.visible { opacity: 1; }
-
-      .ov-nav {
-        display: flex; justify-content: space-between; align-items: center;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
-        color: rgba(255,255,255,0.45);
-      }
-      .ov-nav-links { display: flex; gap: 28px; }
-
-      .ov-hero {
-        flex: 1;
-        display: flex; align-items: center; gap: 48px;
-        padding-top: 8px;
-      }
-
-      .ov-headline {
-        font-family: 'Bebas Neue', sans-serif;
-        font-size: clamp(72px, 11vw, 148px);
-        line-height: 0.90;
-        letter-spacing: 0.03em;
-        text-transform: uppercase;
-        flex-shrink: 0;
-      }
-      .ov-headline .accent { color: #cc1212; }
-
-      .ov-side {
-        max-width: 240px;
-        display: flex; flex-direction: column; gap: 20px;
-        margin-left: auto;
-      }
-      .ov-side p {
-        font-family: 'Inter', sans-serif;
-        font-size: 12.5px; line-height: 1.65; font-weight: 300;
-        color: rgba(255,255,255,0.60);
-      }
-      .ov-btn {
-        pointer-events: auto;
-        align-self: flex-start;
-        padding: 9px 22px;
-        border: 1px solid rgba(255,255,255,0.35);
-        background: transparent; color: #fff; cursor: pointer;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase;
-        transition: background 0.2s, border-color 0.2s;
-      }
-      .ov-btn:hover { background: rgba(255,255,255,0.08); border-color: rgba(255,255,255,0.7); }
-
-      .ov-footer {
-        display: flex; justify-content: space-between; align-items: flex-end;
-        font-family: 'Inter', sans-serif;
-        font-size: 10px; letter-spacing: 0.15em; text-transform: uppercase;
-        color: rgba(255,255,255,0.30);
-      }
-      .ov-footer-links { display: flex; gap: 28px; }
     </style>
   </head>
   <body>
@@ -124,38 +56,6 @@
     </div>
     <div id="c"><canvas id="cv"></canvas></div>
 
-    <div id="overlay">
-      <nav class="ov-nav">
-        <span>Fly Rocket Media</span>
-        <div class="ov-nav-links">
-          <span>Work</span>
-          <span>Services</span>
-          <span>About</span>
-          <span>Contact</span>
-        </div>
-      </nav>
-
-      <div class="ov-hero">
-        <div class="ov-headline">
-          FLY<br>
-          ROCKET<br>
-          <span class="accent">MEDIA.</span>
-        </div>
-        <div class="ov-side">
-          <p>A futuristic fuel studio building websites, brand systems, SEO, and social media campaigns to fuel growth in platforms. No PPC needed — engineer your win.</p>
-          <button class="ov-btn">Get Started</button>
-        </div>
-      </div>
-
-      <footer class="ov-footer">
-        <span>© 2024 Fly Rocket Media</span>
-        <div class="ov-footer-links">
-          <span>Explore</span>
-          <span>Portfolio</span>
-          <span>Contact</span>
-        </div>
-      </footer>
-    </div>
 
     <script>
       import * as THREE from "three";
@@ -175,81 +75,9 @@
       }
       function hideLoader() {
         loaderBar.style.width = '100%';
-        setTimeout(() => {
-          loaderEl.classList.add('hidden');
-          document.getElementById('overlay')!.classList.add('visible');
-        }, 300);
+        setTimeout(() => loaderEl.classList.add('hidden'), 300);
       }
 
-      // ── Space background ─────────────────────────────────────────────────
-      // Large inside-out sphere with the image tiled twice (front + back).
-      // repeat(2, 1) halves the horizontal stretch so the image fills each
-      // hemisphere at its natural aspect ratio instead of being pulled to 360°.
-      const texLoader = new THREE.TextureLoader();
-      texLoader.load('/space-bg.jpg', (tex) => {
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.wrapS = THREE.RepeatWrapping;
-        tex.wrapT = THREE.RepeatWrapping;
-        const skyMesh = new THREE.Mesh(
-          new THREE.SphereGeometry(500, 64, 40),
-          new THREE.ShaderMaterial({
-            uniforms: { map: { value: tex } },
-            side: THREE.BackSide,
-            vertexShader: /* glsl */`
-              varying vec2 vUv;
-              void main() {
-                vUv = uv;
-                gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
-              }
-            `,
-            fragmentShader: /* glsl */`
-              uniform sampler2D map;
-              varying vec2 vUv;
-
-              float hash(vec2 p) {
-                return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453);
-              }
-              float noise(vec2 p) {
-                vec2 i = floor(p);
-                vec2 f = fract(p);
-                f = f * f * (3.0 - 2.0 * f);
-                return mix(
-                  mix(hash(i), hash(i + vec2(1.0, 0.0)), f.x),
-                  mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), f.x),
-                  f.y
-                );
-              }
-
-              void main() {
-                vec3 tint = vec3(0.80, 0.70, 0.78);
-                vec4 col;
-
-                if (vUv.x <= 0.5) {
-                  // Front hemisphere (behind rocket): one clean full image
-                  col = texture2D(map, vec2(vUv.x * 2.0, vUv.y));
-                } else {
-                  // Back hemisphere: tiled + noise-warped fill
-                  vec2 uv = vec2((vUv.x - 0.5) * 2.0, vUv.y) * vec2(3.0, 2.0);
-                  float w = 0.55;
-                  vec2 warp = vec2(
-                    noise(uv * 0.5 + vec2(0.0, 7.3)),
-                    noise(uv * 0.5 + vec2(5.1, 0.0))
-                  ) * w - w * 0.5;
-                  col = texture2D(map, fract(uv + warp));
-                }
-
-                // Desaturate and dim so the sky recedes into the background
-                float lum = dot(col.rgb, vec3(0.2126, 0.7152, 0.0722));
-                col.rgb = mix(vec3(lum), col.rgb, 0.35);
-                col.rgb *= tint * 0.55;
-                gl_FragColor = col;
-              }
-            `,
-          })
-        );
-        skyMesh.rotation.y = Math.PI;
-        scene.add(skyMesh);
-      });
 
       // ── Renderer ──────────────────────────────────────────────────────────
       const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
