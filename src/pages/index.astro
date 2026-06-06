@@ -10,11 +10,11 @@
     <title>Rocket Scene</title>
 <style>
       *, *::before, *::after { margin: 0; padding: 0; box-sizing: border-box; }
-      html { background: #000; }
-      body { width: 100%; min-height: 100vh; background: #000; }
+      html, body { width: 100%; min-height: 100vh; background: #0a0a1a; }
       #c {
         position: fixed; inset: 0;
         opacity: 0; transition: opacity 1.2s ease;
+        background: #0a0a1a;
       }
       #c.ready { opacity: 1; }
       canvas { display: block; width: 100% !important; height: 100% !important; }
@@ -60,17 +60,16 @@
     <script>
       import * as THREE from "three";
       import { GLTFLoader } from "three/addons/loaders/GLTFLoader.js";
-      import { OrbitControls } from "three/addons/controls/OrbitControls.js";
 
       const wrap      = document.getElementById("c")!;
       const canvas    = document.getElementById("cv") as HTMLCanvasElement;
       const loaderEl  = document.getElementById("loader")!;
       const loaderBar = document.getElementById("loader-bar")! as HTMLElement;
 
-      // Track loading progress across both GLBs (each contributes 50%)
+      // Track loading progress across two GLBs (each contributes 1/2)
       const progress = { rocket: 0, flame: 0 };
       function updateProgress() {
-        const pct = (progress.rocket * 0.5 + progress.flame * 0.5) * 100;
+        const pct = (progress.rocket + progress.flame) / 2 * 100;
         loaderBar.style.width = `${Math.min(pct, 98)}%`;
       }
       function hideLoader() {
@@ -80,171 +79,191 @@
 
 
       // ── Renderer ──────────────────────────────────────────────────────────
-      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true, alpha: true });
+      renderer.setClearColor(0x000000, 0);
       renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
       renderer.setSize(window.innerWidth, window.innerHeight);
       renderer.outputColorSpace = THREE.SRGBColorSpace;
-      renderer.toneMapping = THREE.ACESFilmicToneMapping;
-      renderer.toneMappingExposure = 2.0;
 
       // ── Scene / camera ────────────────────────────────────────────────────
       const scene  = new THREE.Scene();
-
       const camera = new THREE.PerspectiveCamera(45, innerWidth / innerHeight, 0.01, 1000);
       camera.position.set(0, 0, 10);
 
-      const controls = new OrbitControls(camera, canvas);
-      controls.enableDamping = true;
-      controls.dampingFactor = 0.06;
-      controls.enablePan = false;
-      controls.enableZoom = true;
-      controls.zoomSpeed = 1.2;
-      controls.minDistance = 1;
-      controls.maxDistance = 500;
+      let bgMesh: THREE.Mesh | null = null;
+      const starMats: THREE.PointsMaterial[] = [];
 
-      // ── Mouse tilt + spin boost ───────────────────────────────────────
-      // Cursor position mapped to -1…1; smoothed each frame toward pivot rotation.
-      // Mouse velocity adds a temporary spin boost that decays back to base speed.
+      // ── Background plane — 3D with mouse parallax ─────────────────────────
+      // The plane sits at Z=-20 and shifts at a slower rate than the rocket,
+      // creating perceivable depth separation between the two layers.
+      function scaleBg() {
+        if (!bgMesh) return;
+        const dist = camera.position.z - bgMesh.position.z;           // 30 units
+        const h = 2 * Math.tan(THREE.MathUtils.degToRad(camera.fov / 2)) * dist * 1.2;
+        bgMesh.scale.set(h * camera.aspect, h, 1);
+      }
+
+      new THREE.TextureLoader().load('/sky-bg.png', (skyTex) => {
+        skyTex.colorSpace = THREE.SRGBColorSpace;
+        const bgMat = new THREE.MeshBasicMaterial({ map: skyTex, depthWrite: false });
+        bgMesh = new THREE.Mesh(new THREE.PlaneGeometry(1, 1), bgMat);
+        bgMesh.position.z = -20;
+        bgMesh.renderOrder = -2;
+        scene.add(bgMesh);
+        scaleBg();
+      });
+
+      // ── Twinkling star field ───────────────────────────────────────────────
+      // 12 groups × 80 stars. Each group has its own random blink speed and
+      // max opacity so they feel independent. Pushed to Z -17…-24 (very far
+      // behind the rocket) and sized at 0.03 world units (~1 pixel on screen).
+      for (let g = 0; g < 12; g++) {
+        const count = 40;
+        const pos = new Float32Array(count * 3);
+        for (let i = 0; i < count; i++) {
+          pos[i*3]   = (Math.random() - 0.5) * 38;
+          pos[i*3+1] = (Math.random() - 0.5) * 26;
+          pos[i*3+2] = -17 - Math.random() * 7;   // Z -17…-24, deep background
+        }
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+        const mat = new THREE.PointsMaterial({
+          size: 0.03,
+          color: 0xffffff,
+          transparent: true,
+          opacity: 0.0,
+          depthWrite: false,
+          depthTest: true,
+          blending: THREE.AdditiveBlending,
+          sizeAttenuation: true,
+        });
+        mat.userData.blinkSpeed  = 0.3 + Math.random() * 1.8;
+        mat.userData.blinkPhase  = Math.random() * Math.PI * 2;
+        mat.userData.maxOpacity  = 0.12 + Math.random() * 0.28;
+        const pts = new THREE.Points(geo, mat);
+        pts.renderOrder = -1;
+        scene.add(pts);
+        starMats.push(mat);
+      }
+
+      // ── Environment map: milky-way image for surface reflections ──────────
+      // Loaded independently so the rich star field / nebula colours reflect
+      // across the rocket's metallic iridescent surface.
+      new THREE.TextureLoader().load('/milky-way-full-stars-space.jpg', (envSrc) => {
+        envSrc.mapping    = THREE.EquirectangularReflectionMapping;
+        envSrc.colorSpace = THREE.SRGBColorSpace;
+        const pmrem  = new THREE.PMREMGenerator(renderer);
+        pmrem.compileEquirectangularShader();
+        const envMap = pmrem.fromEquirectangular(envSrc).texture;
+        scene.environment          = envMap;
+        scene.environmentIntensity = 3.0;   // strong — pulls the nebula colours right onto the surface
+        pmrem.dispose();
+        envSrc.dispose();
+      });
+
+
+
+
+      // ── Mouse tilt ───────────────────────────────────────────────────
       const mouseTilt = { x: 0, y: 0, tx: 0, ty: 0 };
-      let spinBoost = 0;
-      let _prevMx = 0, _prevMy = 0;
-      let _prevSide = 0; // -1 = left half, 1 = right half
       window.addEventListener('mousemove', (e) => {
         mouseTilt.tx = (e.clientX / window.innerWidth  - 0.5) * 2;
         mouseTilt.ty = (e.clientY / window.innerHeight - 0.5) * 2;
-        const dx = e.clientX - _prevMx;
-        const dy = e.clientY - _prevMy;
-        spinBoost = Math.min(spinBoost + Math.sqrt(dx*dx + dy*dy) * 0.0004, 0.07);
-        _prevMx = e.clientX; _prevMy = e.clientY;
-
-        // Upward nudge each time cursor crosses the horizontal centre
-        const side = e.clientX < window.innerWidth / 2 ? -1 : 1;
-        if (_prevSide !== 0 && side !== _prevSide) spring.ty += 1.6;
-        _prevSide = side;
       });
 
-      // ── Click-to-jump spring ──────────────────────────────────────────
-      const spring = { ox: 0, oy: 0, tx: 0, ty: 0 };
-      canvas.addEventListener('click', (e) => {
-        if (!pivot) return;
-        const rPos = new THREE.Vector3().setFromMatrixPosition(pivot.matrixWorld);
-        rPos.project(camera);
-        const sx = (rPos.x * 0.5 + 0.5) * window.innerWidth;
-        const sy = (1 - (rPos.y * 0.5 + 0.5)) * window.innerHeight;
-        const dx = e.clientX - sx;
-        const dy = e.clientY - sy;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        if (dist > 280) return;
-        const nx = dx / (dist || 1);
-        const ny = dy / (dist || 1);
-        spring.tx -= nx * 3.0;
-        spring.ty += ny * 3.0;
-      });
+      // ── Lighting ──────────────────────────────────────────────────────
+      const ambientLight = new THREE.AmbientLight(0xffffff, 2.0);
+      scene.add(ambientLight);
 
-      // ── Cinematic lighting ────────────────────────────────────────────
+      // Key light — front-top-right
+      const dirLight = new THREE.DirectionalLight(0xffffff, 4.0);
+      dirLight.position.set(1, 2, 2);
+      scene.add(dirLight);
 
-      // Static back fill — fixed at the initial rim position, never moves
-      const staticBackLight = new THREE.DirectionalLight(0xffffff, 0.8);
-      staticBackLight.position.set(0, 0, -10);
-      scene.add(staticBackLight);
-
-      // Right key — warm white, dominant, creates main hot reflection on right face
-      const keyLight = new THREE.DirectionalLight(0xfff8e8, 1.2);
-      keyLight.position.set(-5, 3, 5);
-      scene.add(keyLight);
-
-
-      // Rim — deep blue from behind, cuts sharp silhouette edge
-      const rimLight = new THREE.DirectionalLight(0x2255ff, 600.0);
-      rimLight.position.set(0, 0, -10);
-      scene.add(rimLight);
-
-      // Cool blue fill — subtle shadow-side fill on white body
-      const fillLight = new THREE.DirectionalLight(0xfff3d0, 0.7);
-      fillLight.position.set(4, -1, 5);
+      // Fill light — left side, cool, lifts shadow areas
+      const fillLight = new THREE.DirectionalLight(0xdde8ff, 5.0);
+      fillLight.position.set(-2, 0.5, 1);
       scene.add(fillLight);
 
-      // Flame glow — orange point light below nozzle, flickers in render loop
-      const flameGlow = new THREE.PointLight(0xff6600, 3, 14);
-      flameGlow.position.set(0, -2.5, 0.5);
-      scene.add(flameGlow);
+      // Rim light — back-top, edge highlight on the metal body
+      const rimLight = new THREE.DirectionalLight(0xffffff, 4.0);
+      rimLight.position.set(0, 3, -3);
+      scene.add(rimLight);
 
-      // Nozzle interior — positioned dynamically at nozzle center after GLB loads, added to spinGroup
-      const nozzleInteriorLight = new THREE.SpotLight(0xffee77, 20, 8, Math.PI / 3, 0.2);
 
-      // Nozzle — 2 SpotLights (east + west only), positions set dynamically after GLB loads
-      const nozzleLights = [0, 1].map(() => new THREE.SpotLight(0xfff0aa, 10, 5, Math.PI / 12, 0.1));
+      // ── Parallax motion particles ─────────────────────────────────────
+      // Large debris/dust that streams from off-screen top to off-screen bottom,
+      // always behind the rocket, creating the illusion of forward flight.
+      // Matches Spline: PlaneEmitterShape (huge plane above scene), particles
+      // drift in -bodyAxis direction, rocket occludes them via depth test.
 
-      // Window ring — close-range point light positioned right at the window area
-      const windowLight = new THREE.SpotLight(0x1a2a7e, 1.5, 5, Math.PI / 14, 0.15);
+      // Soft glow blob — visible as large background debris
+      const _ptCv = document.createElement('canvas');
+      _ptCv.width = _ptCv.height = 128;
+      const _ptCtx = _ptCv.getContext('2d')!;
+      const _ptGrad = _ptCtx.createRadialGradient(64, 64, 0, 64, 64, 62);
+      _ptGrad.addColorStop(0,    'rgba(255,255,255,0.95)');
+      _ptGrad.addColorStop(0.35, 'rgba(255,255,255,0.7)');
+      _ptGrad.addColorStop(0.65, 'rgba(255,255,255,0.25)');
+      _ptGrad.addColorStop(1.0,  'rgba(255,255,255,0.0)');
+      _ptCtx.fillStyle = _ptGrad;
+      _ptCtx.fillRect(0, 0, 128, 128);
+      const _ptTex = new THREE.CanvasTexture(_ptCv);
 
-      // ── Stars ──────────────────────────────────────────────────────────
-      (() => {
-        const pos: number[] = [];
-        for (let i = 0; i < 300; i++) {
-          pos.push(
-            (Math.random() - 0.5) * 400,
-            (Math.random() - 0.5) * 400,
-            (Math.random() - 0.5) * 400 - 40
-          );
-        }
-        const g = new THREE.BufferGeometry();
-        g.setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
-        scene.add(new THREE.Points(g, new THREE.PointsMaterial({ color: 0xffffff, size: 0.3, sizeAttenuation: true })));
-      })();
+      // Pool of 10 — wide spawn plane so only 1-3 land inside the viewport
+      // at any given moment (matches Spline's large PlaneEmitterShape).
+      const _PC       = 10;
+      const _pLife    = new Float32Array(_PC);
+      const _pMaxLife = 6.0;     // seconds — long enough to cross full screen height
+      const _pPos     = new Float32Array(_PC * 3);
+      const _pVelX    = new Float32Array(_PC);
+      const _pVelY    = new Float32Array(_PC);
+      const _pVelZ    = new Float32Array(_PC);
+      let   _pBirthAcc = 0;
+      const _BIRTH_IVL = 1.0 / 0.75;   // 0.75 per second (from Spline birthRatePerSec)
 
-      // ── Motion particles — streaks falling at rocket's tilt angle ────
-      const PCNT = 35;
-      const pPos   = new Float32Array(PCNT * 3);
-      const pSizes = new Float32Array(PCNT);
-      for (let i = 0; i < PCNT; i++) {
-        pPos[i * 3]     = Math.random() * 80 - 20;
-        pPos[i * 3 + 1] = (Math.random() - 0.5) * 100;
-        pPos[i * 3 + 2] = -(Math.random() * 20 + 2);
-        pSizes[i] = 0.18 + Math.random() * 0.45; // 0.18 – 0.63 scene units
+      for (let i = 0; i < _PC; i++) { _pPos[i*3+1] = 9999; }
+
+      // Spawn a particle from off-screen above, behind the rocket in Z
+      function _pBirth(i: number, ax: number, ay: number, az: number, preWarmY?: number) {
+        const speed = 4.0 + Math.random() * 2.5;    // 4.0–6.5 u/s downward
+        _pVelX[i] = -ax * speed;
+        _pVelY[i] = -ay * speed;
+        _pVelZ[i] = -az * speed;
+        // Wide scatter on the plane perpendicular to bodyAxis
+        const px = (Math.random() - 0.5) * 14;      // X: ±7 (wider than viewport ±4)
+        const pz = -0.8 - Math.random() * 2.2;      // Z: -0.8 to -3 (behind rocket)
+        const py = preWarmY !== undefined
+          ? preWarmY                                  // pre-warm: spread within viewport
+          : (6 + Math.random() * 4);                 // normal: 6–10 off-screen above
+        _pPos[i*3]   = px;
+        _pPos[i*3+1] = py;
+        _pPos[i*3+2] = pz;
+        _pLife[i] = _pMaxLife;
       }
-      const pGeo = new THREE.BufferGeometry();
-      pGeo.setAttribute('position', new THREE.BufferAttribute(pPos, 3));
-      pGeo.setAttribute('aSize',    new THREE.BufferAttribute(pSizes, 1));
 
-      // Soft circular particle texture
-      const _pc = document.createElement('canvas');
-      _pc.width = 64; _pc.height = 64;
-      const _px = _pc.getContext('2d')!;
-      const _pg = _px.createRadialGradient(32, 32, 0, 32, 32, 32);
-      _pg.addColorStop(0,   'rgba(255,255,255,1)');
-      _pg.addColorStop(0.4, 'rgba(255,255,255,0.8)');
-      _pg.addColorStop(1,   'rgba(255,255,255,0)');
-      _px.fillStyle = _pg;
-      _px.beginPath(); _px.arc(32, 32, 32, 0, Math.PI * 2); _px.fill();
+      // Pre-warm 4 particles spread across the viewport so it isn't empty on load
+      const _initAx = 0, _initAy = 1, _initAz = 0;
+      for (let i = 0; i < 4; i++) {
+        _pBirth(i, _initAx, _initAy, _initAz, -3 + Math.random() * 8);
+        _pLife[i] = Math.random() * _pMaxLife;  // randomise remaining life
+      }
 
-      const pMat = new THREE.ShaderMaterial({
-        uniforms: {
-          map:     { value: new THREE.CanvasTexture(_pc) },
-          uViewH:  { value: window.innerHeight },
-        },
-        vertexShader: /* glsl */`
-          attribute float aSize;
-          uniform float uViewH;
-          void main() {
-            vec4 mv = modelViewMatrix * vec4(position, 1.0);
-            gl_PointSize = aSize * projectionMatrix[1][1] * uViewH * 0.5 / (-mv.z);
-            gl_Position  = projectionMatrix * mv;
-          }
-        `,
-        fragmentShader: /* glsl */`
-          uniform sampler2D map;
-          void main() {
-            vec4 tex = texture2D(map, gl_PointCoord);
-            if (tex.a < 0.01) discard;
-            gl_FragColor = vec4(1.0, 0.82, 0.66, tex.a);
-          }
-        `,
+      const _pGeo = new THREE.BufferGeometry();
+      _pGeo.setAttribute('position', new THREE.BufferAttribute(_pPos, 3));
+      const _pMat = new THREE.PointsMaterial({
+        size: 0.9,
+        map: _ptTex,
+        color: new THREE.Color(0.807, 0.792, 0.798),
         transparent: true,
-        depthWrite:  false,
+        opacity: 0.45,
+        blending: THREE.AdditiveBlending,
+        depthWrite: false,
+        depthTest: true,     // rocket renders in front — particles stay behind it
+        sizeAttenuation: true,
       });
-      const motionParticles = new THREE.Points(pGeo, pMat);
-      scene.add(motionParticles);
+      const _pSystem = new THREE.Points(_pGeo, _pMat);
+      scene.add(_pSystem);
 
       // ── Custom materials ──────────────────────────────────────────────
       // Fuselage: GLSL gradient driven by local vertex Y position.
@@ -569,9 +588,9 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
             varying vec3  vNorm;
             varying vec3  vWorldPos;
             vec3 finGrad(float t) {
-              // bottom: bright #cc1212, top: dark #a5271d — high contrast
-              if(t<0.50) return mix(vec3(1.00,0.07,0.07), vec3(0.80,0.08,0.07), t/0.50);
-              return mix(vec3(0.80,0.08,0.07), vec3(0.42,0.10,0.07), (t-0.50)/0.50);
+              // bottom: warm bright red, top: dark red — no white
+              if(t<0.50) return mix(vec3(0.90,0.22,0.12), vec3(0.65,0.10,0.07), t/0.50);
+              return mix(vec3(0.65,0.10,0.07), vec3(0.32,0.07,0.05), (t-0.50)/0.50);
             }
             void main() {
               vec3 col = finGrad(vT);
@@ -718,6 +737,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
       const loader = new GLTFLoader();
       let pivot: THREE.Group | null = null;
       let spinGroup: THREE.Group | null = null;
+      let rocketBodyAxis: THREE.Vector3 = new THREE.Vector3(0, 1, 0);
 
       const loadGLB = (url: string, onProg?: (n: number) => void) =>
         new Promise<any>((res, rej) =>
@@ -727,7 +747,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
         );
 
       Promise.all([
-        loadGLB("/Orange_Rocket.glb", (n) => { progress.rocket = n; updateProgress(); }),
+        loadGLB("/Final_texture_spline_smooth_rocket.glb", (n) => { progress.rocket = n; updateProgress(); }),
         loadGLB("/toy_rocket.glb",    (n) => { progress.flame  = n; updateProgress(); }),
       ])
         .then(([rocketGltf, flameGltf]) => {
@@ -746,12 +766,220 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
           const rCtr  = rb2.getCenter(new THREE.Vector3());
           rocketRoot.position.sub(rCtr);
 
-          // Nozzle position = bottom of rocket bounding box
           const rb3    = new THREE.Box3().setFromObject(rocketRoot);
-          const nozzleY = rb3.min.y;
+          const rHeight = rb3.max.y - rb3.min.y;
 
-          // Replace texture on fuselage + fins — pass world Y range so gradient is consistent
-          const windowInfo = customizeRocketMaterials(rocketRoot, rb3.min.y, rb3.max.y);
+          // ── Iridescent / glossy material upgrade ──────────────────────────
+          // Replace MeshStandardMaterial with MeshPhysicalMaterial keeping all
+          // existing GLB texture maps, then layer iridescence on top.
+          rocketRoot.traverse((o: THREE.Object3D) => {
+            const mesh = o as THREE.Mesh;
+            if (!mesh.isMesh || !mesh.material) return;
+            const upgrade = (mat: THREE.Material): THREE.MeshPhysicalMaterial => {
+              const s = mat as THREE.MeshStandardMaterial;
+              return new THREE.MeshPhysicalMaterial({
+                map:              s.map,
+                normalMap:        s.normalMap,
+                // roughnessMap / metalnessMap nulled so our scalar values are
+                // fully in control — GLB baked maps were overriding them on
+                // fins, nozzle and nose cone, killing reflections there.
+                roughnessMap:     null,
+                metalnessMap:     null,
+                aoMap:            s.aoMap,
+                emissiveMap:      s.emissiveMap,
+                emissive:         s.emissive?.clone() ?? new THREE.Color(0x000000),
+                emissiveIntensity: s.emissiveIntensity ?? 0,
+                color:            s.color?.clone() ?? new THREE.Color(0xffffff),
+                roughness:        0.05,
+                metalness:        0.82,
+                envMapIntensity:  6.0,
+                // Iridescence — thin-film interference, angle-dependent colour shift
+                iridescence:               0.35,
+                iridescenceIOR:            1.3,
+                iridescenceThicknessRange: [100, 400],
+              });
+            };
+            if (Array.isArray(mesh.material)) {
+              mesh.material = mesh.material.map(upgrade);
+            } else {
+              mesh.material = upgrade(mesh.material);
+            }
+          });
+
+          // ── Apply fin gradient shader (overrides iridescence upgrade on fins) ──
+          {
+            rocketRoot.updateWorldMatrix(false, true);
+            const _rb  = new THREE.Box3().setFromObject(rocketRoot);
+            const _rs  = _rb.getSize(new THREE.Vector3());
+            const _rc  = _rb.getCenter(new THREE.Vector3());
+            rocketRoot.traverse((o: THREE.Object3D) => {
+              const mesh = o as THREE.Mesh;
+              if (!mesh.isMesh) return;
+              const wb    = new THREE.Box3().setFromObject(mesh);
+              const ws    = wb.getSize(new THREE.Vector3());
+              const wc    = wb.getCenter(new THREE.Vector3());
+              const lat   = Math.sqrt((wc.x - _rc.x) ** 2 + (wc.z - _rc.z) ** 2);
+              const hRatio = ws.y / _rs.y;
+              const maxLat = Math.max(ws.x, ws.z);
+              const isFin  = wc.y < _rc.y
+                && lat    > _rs.x * 0.06
+                && hRatio < 0.55
+                && maxLat > _rs.x * 0.08;
+              if (isFin) {
+                mesh.updateWorldMatrix(true, false);
+                const _yMin   = wb.min.y;
+                const _yMax   = wb.max.y;
+                const _baseMx = mesh.matrixWorld.clone();
+                const finMat  = mesh.material as THREE.MeshPhysicalMaterial;
+                finMat.onBeforeCompile = (shader) => {
+                  shader.uniforms.yMin   = { value: _yMin };
+                  shader.uniforms.yMax   = { value: _yMax };
+                  shader.uniforms.baseMx = { value: _baseMx };
+                  shader.vertexShader = shader.vertexShader
+                    .replace('#include <common>',
+                      `#include <common>
+uniform mat4  baseMx;
+uniform float yMin, yMax;
+varying float vFinT;`)
+                    .replace('#include <begin_vertex>',
+                      `#include <begin_vertex>
+float _pY = (baseMx * vec4(position, 1.0)).y;
+vFinT = clamp((_pY - yMin) / (yMax - yMin), 0.0, 1.0);`);
+                  shader.fragmentShader = shader.fragmentShader
+                    .replace('#include <common>',
+                      `#include <common>
+varying float vFinT;`)
+                    .replace('#include <dithering_fragment>',
+                      `#include <dithering_fragment>
+gl_FragColor.rgb *= mix(1.6, 0.5, vFinT);`);
+                };
+                finMat.needsUpdate = true;
+              }
+            });
+          }
+
+
+          // Spline bakes the tilt into geometry vertices — rocketRoot.quaternion is
+          // identity. The body axis comes from the bounding-box centres of the two
+          // rotationally-symmetric meshes confirmed via dev-tools:
+          //   polySurface4 = nose cone   (bbox centre z=0.000)
+          //   polySurface5 = fuselage body (bbox centre z=0.000, spans nose→nozzle)
+          // Using bbox centres avoids the PCA chicken-and-egg: projecting onto a
+          // wrong axis biases the nozzle cluster toward one side of the exit ring.
+          rocketRoot.updateWorldMatrix(false, true);
+
+          // Pass 1: bbox centres of the two on-axis meshes → correct bodyAxis (z≈0)
+          const _poly4Cen = new THREE.Vector3(), _poly5Cen = new THREE.Vector3();
+          let _has4 = false, _has5 = false;
+          rocketRoot.traverse((o: THREE.Object3D) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh) return;
+            if (m.name === 'polySurface4') {
+              new THREE.Box3().setFromObject(m).getCenter(_poly4Cen); _has4 = true;
+            }
+            if (m.name === 'polySurface5') {
+              new THREE.Box3().setFromObject(m).getCenter(_poly5Cen); _has5 = true;
+            }
+          });
+
+          // Body axis = polySurface5 centre → polySurface4 centre (both z=0 → axis z≈0)
+          const bodyAxis = new THREE.Vector3(0, 1, 0);
+          if (_has4 && _has5) {
+            bodyAxis.copy(_poly4Cen.clone().sub(_poly5Cen).normalize());
+            if (bodyAxis.y < 0) bodyAxis.negate();
+          }
+
+          // Pass 2: find nose tip (max proj of polySurface4) and
+          //         nozzle exit ring centroid (min proj cluster of polySurface5)
+          // With the correct bodyAxis the projection is unbiased and nozzleCen.z ≈ 0.
+          const _noseTipV = new THREE.Vector3();
+          const _nozzCen  = new THREE.Vector3();
+          let   _nozzN    = 0;
+
+          rocketRoot.traverse((o: THREE.Object3D) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh || !m.geometry?.attributes?.position) return;
+            const pa = m.geometry.attributes.position as THREE.BufferAttribute;
+
+            if (m.name === 'polySurface4') {
+              let _best = -Infinity;
+              for (let i = 0; i < pa.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld);
+                const p = v.dot(bodyAxis);
+                if (p > _best) { _best = p; _noseTipV.copy(v); }
+              }
+            }
+
+            if (m.name === 'polySurface5') {
+              let _minP = Infinity;
+              for (let i = 0; i < pa.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld);
+                const p = v.dot(bodyAxis);
+                if (p < _minP) _minP = p;
+              }
+              // Average vertices within 0.15 world units of the minimum (≈ nozzle exit ring)
+              for (let i = 0; i < pa.count; i++) {
+                const v = new THREE.Vector3().fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld);
+                if (v.dot(bodyAxis) < _minP + 0.15) { _nozzCen.add(v); _nozzN++; }
+              }
+              if (_nozzN > 0) _nozzCen.divideScalar(_nozzN);
+            }
+          });
+
+          // Collect centroid for debug mesh projections only (not used for axis/position)
+          const _pcaV: THREE.Vector3[] = [];
+          rocketRoot.traverse((o: THREE.Object3D) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh || !m.geometry?.attributes?.position) return;
+            const pa   = m.geometry.attributes.position as THREE.BufferAttribute;
+            const step = Math.max(1, Math.floor(pa.count / 200));
+            for (let i = 0; i < pa.count; i += step)
+              _pcaV.push(new THREE.Vector3().fromBufferAttribute(pa, i).applyMatrix4(m.matrixWorld));
+          });
+          const _pcaCen = new THREE.Vector3();
+          _pcaV.forEach(v => _pcaCen.add(v));
+          _pcaCen.divideScalar(_pcaV.length);
+
+          const _bodyLen    = _noseTipV.distanceTo(_nozzCen);
+          const halfBodyLen = _bodyLen * 0.5;
+          const nozzleWorld = _nozzCen.clone();
+          rocketBodyAxis.copy(bodyAxis);
+
+          // ── DEBUG logs (open browser console / F12) ───────────────
+          console.log('=== ROCKET AXIS DEBUG ===');
+          console.log('rocketRoot.quaternion xyzw:',
+            rocketRoot.quaternion.x.toFixed(4), rocketRoot.quaternion.y.toFixed(4),
+            rocketRoot.quaternion.z.toFixed(4), rocketRoot.quaternion.w.toFixed(4));
+          console.log('poly4Cen:', _poly4Cen.x.toFixed(4), _poly4Cen.y.toFixed(4), _poly4Cen.z.toFixed(4));
+          console.log('poly5Cen:', _poly5Cen.x.toFixed(4), _poly5Cen.y.toFixed(4), _poly5Cen.z.toFixed(4));
+          console.log('bodyAxis (from bbox centres):', bodyAxis.x.toFixed(4), bodyAxis.y.toFixed(4), bodyAxis.z.toFixed(4));
+          console.log('noseTipV:', _noseTipV.x.toFixed(4), _noseTipV.y.toFixed(4), _noseTipV.z.toFixed(4));
+          console.log('nozzleCen:', _nozzCen.x.toFixed(4), _nozzCen.y.toFixed(4), _nozzCen.z.toFixed(4));
+          console.log('body length (world units):', _bodyLen.toFixed(4));
+          console.log('--- mesh world bounding boxes (sorted nose→nozzle) ---');
+          const _meshInfos: {name:string, cx:number, cy:number, cz:number, proj:number}[] = [];
+          rocketRoot.traverse((o: THREE.Object3D) => {
+            const m = o as THREE.Mesh;
+            if (!m.isMesh) return;
+            const _bb = new THREE.Box3().setFromObject(m);
+            const _bc = _bb.getCenter(new THREE.Vector3());
+            _meshInfos.push({
+              name: m.name,
+              cx: _bc.x, cy: _bc.y, cz: _bc.z,
+              proj: _bc.clone().sub(_pcaCen).dot(bodyAxis)
+            });
+          });
+          _meshInfos.sort((a, b) => b.proj - a.proj);
+          _meshInfos.forEach(mi =>
+            console.log(`  [proj ${mi.proj.toFixed(3)}] "${mi.name}" centre: ${mi.cx.toFixed(3)} ${mi.cy.toFixed(3)} ${mi.cz.toFixed(3)}`)
+          );
+          console.log('=========================');
+          // ─────────────────────────────────────────────────────────
+
+          const nozzleY  = nozzleWorld.y;
+          const nozzleCx = nozzleWorld.x;
+          const nozzleCz = nozzleWorld.z;
+
 
           // ── Flame ─────────────────────────────────────────────────
           const flameRoot = flameGltf.scene as THREE.Group;
@@ -761,142 +989,46 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
           flameRoot.traverse((c: THREE.Object3D) => { if (c.name === "Flame") flameGroup = c; });
           if (!flameGroup) { console.error("Flame node not found"); return; }
 
-          // Strip parent transforms, keep world scale
-          const ws = new THREE.Vector3();
-          flameGroup.matrixWorld.decompose(new THREE.Vector3(), new THREE.Quaternion(), ws);
+          // Full clean slate — no inherited position, rotation, or scale.
+          // Using ws from matrixWorld caused non-uniform scale → shear → flame
+          // appeared at a different angle from every camera direction.
           flameGroup.removeFromParent();
           flameGroup.position.set(0, 0, 0);
           flameGroup.quaternion.set(0, 0, 0, 1);
-          flameGroup.scale.copy(ws);
+          flameGroup.scale.set(1, 1, 1);
 
           applyMaterials(flameGroup);
 
-          // Scale flame: height = 55% of rocket height, preserving aspect ratio
+          // Scale to 90% of rocket height — uniform scale, no shear
           const fb1   = new THREE.Box3().setFromObject(flameGroup);
           const fSize = fb1.getSize(new THREE.Vector3());
-          const fk    = (rSize.y * rk * 1.10) / fSize.y;
-          flameGroup.scale.multiplyScalar(fk);
+          // Use true body length from PCA (not world-AABB height which is shorter when tilted)
+          const fk    = (_bodyLen * 0.90) / fSize.y;
+          flameGroup.scale.setScalar(fk);
 
-          // Centre flame in X/Z, then snap its top (nozzle end, dark-red, t=1) to nozzleY
-          const fb2  = new THREE.Box3().setFromObject(flameGroup);
-          const fCtr = fb2.getCenter(new THREE.Vector3());
-          flameGroup.position.x -= fCtr.x;
-          flameGroup.position.z -= fCtr.z;
+          // Flame's attachment end = max Y in flame's own local space (y=+224 per shader)
+          const fLocalMaxY = fb1.max.y;
 
-          const fb3 = new THREE.Box3().setFromObject(flameGroup);
-          // fb3.max.y is the top of flame — push it 0.35 units inside the nozzle
-          flameGroup.position.y += nozzleY - fb3.max.y + 0.35;
+          // Rotate flame so its local +Y aligns with the PCA-derived body axis
+          flameGroup.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), bodyAxis);
 
-          // ── Orange ring at nose-cone / fuselage junction ──────────
-          // Find the top of the fuselage mesh (tallest centred mesh) for exact placement
-          const rocketWidth  = rb3.max.x - rb3.min.x;
-          const rocketHeight = rb3.max.y - rb3.min.y;
-          const rocketCtrX   = (rb3.max.x + rb3.min.x) / 2;
-          const rocketCtrZ   = (rb3.max.z + rb3.min.z) / 2;
-          // Find the nose cone: centered mesh that reaches the rocket tip.
-          // Its min.y is the exact junction; its XZ width gives the exact ring radius.
-          let junctionY = rb3.min.y + rocketHeight * 0.78; // fallback
-          let junctionWidth = rocketWidth; // fallback
-          let bestNoseMinY = Infinity;
-          rocketRoot.traverse((c: THREE.Object3D) => {
-            const m = c as THREE.Mesh;
-            if (!m.isMesh) return;
-            const wb2 = new THREE.Box3().setFromObject(m);
-            const ws2 = wb2.getSize(new THREE.Vector3());
-            const wc2 = wb2.getCenter(new THREE.Vector3());
-            const lat2 = Math.sqrt((wc2.x - rocketCtrX) ** 2 + (wc2.z - rocketCtrZ) ** 2);
-            const hr2  = ws2.y / rocketHeight;
-            const touchesTip = wb2.max.y > rb3.max.y - rocketHeight * 0.06;
-            if (touchesTip && lat2 < rocketWidth * 0.35 && hr2 < 0.50 && wb2.min.y < bestNoseMinY) {
-              bestNoseMinY = wb2.min.y;
-              junctionY = wb2.min.y;
-              junctionWidth = Math.max(ws2.x, ws2.z);
-            }
-          });
-          const ringR = junctionWidth * 0.50;
-          // Rectangular cross-section ring: revolve a box profile around Y axis
-          const bandW  = ringR * 0.009;
-          const bandH  = ringR * 0.022;
-          const rIn    = ringR - bandW / 2;
-          const rOut   = ringR + bandW / 2;
-          const ringPts = [
-            new THREE.Vector2(rIn,  -bandH),
-            new THREE.Vector2(rOut, -bandH),
-            new THREE.Vector2(rOut,  bandH),
-            new THREE.Vector2(rIn,   bandH),
-            new THREE.Vector2(rIn,  -bandH),
-          ];
-          const jRing = new THREE.Mesh(
-            new THREE.LatheGeometry(ringPts, 64),
-            new THREE.MeshStandardMaterial({
-              color: 0xc8cdd4,
-              roughness: 0.05,
-              metalness: 1.0,
-              envMapIntensity: 4.0,
-            })
-          );
-          jRing.position.y = junctionY;
-
-          // ── Pivot — tilt to match reference, float animation ──────
-          // spinGroup rotates around its local Y (= the rocket's own tilted axis)
-          // flameGroup is outside spinGroup so it stays directionally fixed
-          spinGroup = new THREE.Group();
-          spinGroup.add(rocketRoot);
-          spinGroup.add(jRing);
-          spinGroup.add(windowLight);
-          spinGroup.add(windowLight.target);
-          nozzleLights.forEach(l => { spinGroup.add(l); spinGroup.add(l.target); });
-          spinGroup.add(nozzleInteriorLight);
-          spinGroup.add(nozzleInteriorLight.target);
-
-          if (windowInfo.window) {
-            const { center, size } = windowInfo.window;
-            const dir = new THREE.Vector3(center.x, 0, center.z).normalize();
-            windowLight.position.copy(center).addScaledVector(dir, -0.4);
-            windowLight.target.position.copy(center).addScaledVector(dir, 3.0);
-            const windowRadius = Math.max(size.x, size.z) * 0.5;
-            windowLight.angle = Math.atan2(windowRadius, 3.4);
-            windowLight.penumbra = 0.08;
-          }
-
-          {
-            // Use classified nozzle mesh if found, otherwise fall back to bottom of rocket bounding box
-            const nozzleInfo = windowInfo.nozzle;
-            const nozzleY   = nozzleInfo ? nozzleInfo.center.y : rb3.min.y + (rb3.max.y - rb3.min.y) * 0.08;
-            const nozzleR   = nozzleInfo ? Math.max(nozzleInfo.size.x, nozzleInfo.size.z) * 0.5 : (rb3.max.x - rb3.min.x) * 0.12;
-            const nozzleH   = nozzleInfo ? nozzleInfo.size.y : (rb3.max.y - rb3.min.y) * 0.15;
-            const cx        = nozzleInfo ? nozzleInfo.center.x : 0;
-            const cz        = nozzleInfo ? nozzleInfo.center.z : 0;
-;
-
-            const dist      = nozzleR * 2.5;
-            const halfH     = nozzleH * 0.5;
-            const topY      = nozzleY + halfH;
-            const angle     = Math.atan2(Math.max(nozzleR, halfH), dist);
-            const dirs = [
-              new THREE.Vector3( dist, 0, 0),  // east
-              new THREE.Vector3(-dist, 0, 0),  // west
-            ];
-            nozzleLights.forEach((l, i) => {
-              l.position.set(cx + dirs[i].x, nozzleY - halfH, cz + dirs[i].z);
-              l.target.position.set(cx, topY, cz);
-              l.angle   = angle;
-              l.penumbra = 0.1;
-            });
-
-            // Interior upward light — below nozzle opening, fires straight up into the throat
-            nozzleInteriorLight.position.set(cx, nozzleY - halfH - 0.45, cz);
-            nozzleInteriorLight.target.position.set(cx, nozzleY + nozzleH * 2, cz);
-
-          }
+          // Place flame so its attachment end sits at nozzle + 5 % overlap along body axis
+          const overlapDist = fk * fSize.y * 0.05;
+          flameGroup.position.copy(nozzleWorld)
+            .addScaledVector(bodyAxis, overlapDist - fk * fLocalMaxY);
 
           const tiltGroup = new THREE.Group();
-          tiltGroup.rotation.z = -0.32;
-          tiltGroup.add(spinGroup);
+          tiltGroup.add(rocketRoot);
           tiltGroup.add(flameGroup);
 
+
+          // spinGroup is now the OUTER group — it spins around world Y (true vertical)
+          // tiltGroup sits inside it and just applies the cosmetic lean
+          spinGroup = new THREE.Group();
+          spinGroup.add(tiltGroup);
+
           pivot = new THREE.Group();
-          pivot.add(tiltGroup);
+          pivot.add(spinGroup);
           scene.add(pivot);
 
           wrap.classList.add("ready");
@@ -909,58 +1041,67 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
       let prevT = 0;
       (function animate() {
         requestAnimationFrame(animate);
-        const t = clock.getElapsedTime();
+        const t  = clock.getElapsedTime();
         const dt = Math.min(t - prevT, 0.05);
         prevT = t;
-
-        // Spring settle
-        // Ease offset back toward zero — no spring, no bounce
-        // Smoothly follow the target (slow drift away)
-        spring.ox += (spring.tx - spring.ox) * 0.025;
-        spring.oy += (spring.ty - spring.oy) * 0.025;
-        // Target itself slowly decays back to zero (slow return)
-        spring.tx *= 0.992;
-        spring.ty *= 0.992;
 
         // Smooth mouse tilt
         mouseTilt.x += (mouseTilt.tx - mouseTilt.x) * 0.04;
         mouseTilt.y += (mouseTilt.ty - mouseTilt.y) * 0.04;
 
-        if (pivot) {
-          pivot.position.x = spring.ox;
-          pivot.position.y = Math.sin(t * 1.2) * 0.6 + spring.oy;
-          pivot.rotation.z =  mouseTilt.x * -0.25;
-          pivot.rotation.x =  mouseTilt.y *  0.18;
-        }
-        if (spinGroup) {
-          spinBoost *= 0.975; // decay back to zero
-          spinGroup.rotation.y += 0.02 + spinBoost;
+        // Background parallax — moves at ~25% of rocket tilt, opposite direction
+        if (bgMesh) {
+          bgMesh.position.x += (-mouseTilt.x * 1.8 - bgMesh.position.x) * 0.04;
+          bgMesh.position.y += ( mouseTilt.y * 1.2 - bgMesh.position.y) * 0.04;
         }
 
-        // Move particles along rocket's tilt axis (opposite direction = illusion of upward travel)
-        const pdx = -Math.sin(0.32) * 0.22;
-        const pdy = -Math.cos(0.32) * 0.22;
-        const pa = motionParticles.geometry.attributes.position.array as Float32Array;
-        for (let i = 0; i < PCNT; i++) {
-          pa[i * 3]     += pdx;
-          pa[i * 3 + 1] += pdy;
-          if (pa[i * 3 + 1] < -50) {
-            pa[i * 3]     = Math.random() * 80 - 20;
-            pa[i * 3 + 1] = 50;
-            pa[i * 3 + 2] = -(Math.random() * 20 + 2);
-          }
+        if (spinGroup) {
+          spinGroup.quaternion.setFromAxisAngle(rocketBodyAxis, t * 2.0);
         }
-        motionParticles.geometry.attributes.position.needsUpdate = true;
+
+        if (pivot) {
+          const floatAmt = Math.sin(t * 1.2) * 0.6;
+          pivot.position.copy(rocketBodyAxis).multiplyScalar(floatAmt);
+          pivot.rotation.z = mouseTilt.x * -0.35;
+          pivot.rotation.x = mouseTilt.y *  0.25;
+        }
 
         flameUniforms.time.value = t;
-        flameGlow.intensity = 5 + Math.sin(t * 9) * 1.2 + Math.sin(t * 14) * 0.6;
 
-        // Dynamic rim light — always directly behind the object from the camera's view
-        const _behindDir = controls.target.clone().sub(camera.position).normalize();
-        rimLight.position.copy(controls.target).addScaledVector(_behindDir, 10);
+        // Each group blinks at its own random speed and max brightness
+        starMats.forEach((mat) => {
+          const { blinkSpeed, blinkPhase, maxOpacity } = mat.userData;
+          mat.opacity = maxOpacity * (0.5 + 0.5 * Math.sin(t * blinkSpeed + blinkPhase));
+        });
 
+        // ── Parallax motion particles ─────────────────────────────────
+        {
+          const _pAttr = _pGeo.attributes.position as THREE.BufferAttribute;
+          const ax = rocketBodyAxis.x, ay = rocketBodyAxis.y, az = rocketBodyAxis.z;
 
-        controls.update();
+          // Spawn new particles from above at 0.75/s
+          _pBirthAcc += dt;
+          if (_pBirthAcc >= _BIRTH_IVL) {
+            _pBirthAcc -= _BIRTH_IVL;
+            let slot = -1;
+            for (let i = 0; i < _PC; i++) { if (_pLife[i] <= 0) { slot = i; break; } }
+            if (slot >= 0) _pBirth(slot, ax, ay, az);
+          }
+
+          for (let i = 0; i < _PC; i++) {
+            if (_pLife[i] <= 0) continue;
+            _pLife[i] -= dt;
+            if (_pLife[i] <= 0) {
+              _pPos[i*3] = _pPos[i*3+1] = _pPos[i*3+2] = 9999;
+              continue;
+            }
+            _pPos[i*3]   += _pVelX[i] * dt;
+            _pPos[i*3+1] += _pVelY[i] * dt;
+            _pPos[i*3+2] += _pVelZ[i] * dt;
+          }
+          _pAttr.needsUpdate = true;
+        }
+
         renderer.render(scene, camera);
       })();
 
@@ -968,7 +1109,7 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
         camera.aspect = innerWidth / innerHeight;
         camera.updateProjectionMatrix();
         renderer.setSize(innerWidth, innerHeight);
-        pMat.uniforms.uViewH.value = innerHeight;
+        scaleBg();
       });
     </script>
   </body>
