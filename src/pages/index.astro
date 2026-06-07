@@ -206,7 +206,7 @@
       scene.add(ambientLight);
 
       // Key light — front-top-right
-      const dirLight = new THREE.DirectionalLight(0xffffff, 4.0);
+      const dirLight = new THREE.DirectionalLight(0xffffff, 6.0);
       dirLight.position.set(1, 2, 2);
       scene.add(dirLight);
 
@@ -848,13 +848,15 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
               const wb    = new THREE.Box3().setFromObject(mesh);
               const ws    = wb.getSize(new THREE.Vector3());
               const wc    = wb.getCenter(new THREE.Vector3());
-              const lat   = Math.sqrt((wc.x - _rc.x) ** 2 + (wc.z - _rc.z) ** 2);
-              const hRatio = ws.y / _rs.y;
-              const maxLat = Math.max(ws.x, ws.z);
+              const lat      = Math.sqrt((wc.x - _rc.x) ** 2 + (wc.z - _rc.z) ** 2);
+              const hRatio   = ws.y / _rs.y;
+              const maxLat   = Math.max(ws.x, ws.z);
+              const flatness = ws.y / (maxLat + 0.0001);
               const isFin  = wc.y < _rc.y
                 && lat    > _rs.x * 0.06
                 && hRatio < 0.55
                 && maxLat > _rs.x * 0.08;
+              const isFuselage = hRatio > 0.30 && flatness > 1.0 && lat < _rs.x * 0.3;
               if (isFin) {
                 mesh.updateWorldMatrix(true, false);
                 const _yMin   = wb.min.y;
@@ -884,6 +886,41 @@ varying float vFinT;`)
 gl_FragColor.rgb *= mix(1.6, 0.5, vFinT);`);
                 };
                 finMat.needsUpdate = true;
+              } else if (isFuselage) {
+                // ── Fuselage: show base colour on left side + lower nozzle area ──
+                // Reduces metalness on world-left-facing normals and the bottom
+                // portion of the body, letting the original texture colour through.
+                mesh.updateWorldMatrix(true, false);
+                const _yMin   = wb.min.y;
+                const _yMax   = wb.max.y;
+                const _baseMx = mesh.matrixWorld.clone();
+                const fuseMat = mesh.material as THREE.MeshPhysicalMaterial;
+                fuseMat.onBeforeCompile = (shader) => {
+                  shader.uniforms.yMin   = { value: _yMin };
+                  shader.uniforms.yMax   = { value: _yMax };
+                  shader.uniforms.baseMx = { value: _baseMx };
+                  shader.vertexShader = shader.vertexShader
+                    .replace('#include <common>', `#include <common>
+uniform mat4  baseMx;
+uniform float yMin, yMax;
+varying float vFuseT;
+varying vec3  vWNorm;`)
+                    .replace('#include <begin_vertex>', `#include <begin_vertex>
+vec4 _wp = baseMx * vec4(position, 1.0);
+vFuseT  = clamp((_wp.y - yMin) / (yMax - yMin), 0.0, 1.0);
+vWNorm  = normalize(mat3(modelMatrix) * objectNormal);`);
+                  shader.fragmentShader = shader.fragmentShader
+                    .replace('#include <common>', `#include <common>
+varying float vFuseT;
+varying vec3  vWNorm;`)
+                    .replace('#include <metalnessmap_fragment>', `#include <metalnessmap_fragment>
+float _leftB   = smoothstep(-0.1, -0.9, vWNorm.x);
+float _botB    = smoothstep(0.14, 0.32, vFuseT) * smoothstep(0.58, 0.26, vFuseT);
+float _cBlend  = clamp(_leftB * 0.38 + _botB * 0.55, 0.0, 0.45);
+metalnessFactor = mix(metalnessFactor, 0.48, _cBlend);
+roughnessFactor = mix(roughnessFactor, 0.25, _cBlend * 0.4);`);
+                };
+                fuseMat.needsUpdate = true;
               }
             });
           }
