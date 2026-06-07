@@ -903,7 +903,7 @@ gl_FragColor.rgb *= mix(1.6, 0.5, vFinT);`);
                 mesh.updateWorldMatrix(true, false);
                 const fuseBaseMat = mesh.material as THREE.MeshPhysicalMaterial;
                 fuseBaseMat.envMapIntensity = 8.0;
-                fuseBaseMat.roughness       = 0.03;
+                fuseBaseMat.roughness       = 0.05;
                 fuseBaseMat.needsUpdate     = true;
                 const _yMin   = wb.min.y;
                 const _yMax   = wb.max.y;
