@@ -242,26 +242,25 @@
 
       // Pool of 10 — wide spawn plane so only 1-3 land inside the viewport
       // at any given moment (matches Spline's large PlaneEmitterShape).
-      const _PC       = 10;
+      const _PC       = 40;
       const _pLife    = new Float32Array(_PC);
-      const _pMaxLife = 6.0;     // seconds — long enough to cross full screen height
+      const _pMaxLife = 4.0;
       const _pPos     = new Float32Array(_PC * 3);
       const _pVelX    = new Float32Array(_PC);
       const _pVelY    = new Float32Array(_PC);
       const _pVelZ    = new Float32Array(_PC);
       let   _pBirthAcc = 0;
-      const _BIRTH_IVL = 1.0 / 0.75;   // 0.75 per second (from Spline birthRatePerSec)
+      const _BIRTH_IVL = 1.0 / 5.0;   // 5 per second
 
       for (let i = 0; i < _PC; i++) { _pPos[i*3+1] = 9999; }
 
       // Spawn a particle from off-screen above, behind the rocket in Z
       function _pBirth(i: number, ax: number, ay: number, az: number, preWarmY?: number) {
-        const speed = 4.0 + Math.random() * 2.5;    // 4.0–6.5 u/s downward
+        const speed = 8.0 + Math.random() * 5.0;    // 8.0–13.0 u/s downward
         _pVelX[i] = -ax * speed;
         _pVelY[i] = -ay * speed;
         _pVelZ[i] = -az * speed;
-        // Wide scatter on the plane perpendicular to bodyAxis
-        const px = (Math.random() - 0.5) * 14;      // X: ±7 (wider than viewport ±4)
+        const px = (Math.random() - 0.5) * 36;      // X: ±18 — full screen + beyond
         const pz = -0.8 - Math.random() * 2.2;      // Z: -0.8 to -3 (behind rocket)
         const py = preWarmY !== undefined
           ? preWarmY                                  // pre-warm: spread within viewport
@@ -272,21 +271,21 @@
         _pLife[i] = _pMaxLife;
       }
 
-      // Pre-warm 4 particles spread across the viewport so it isn't empty on load
+      // Pre-warm 15 particles spread across the viewport so it isn't empty on load
       const _initAx = 0, _initAy = 1, _initAz = 0;
-      for (let i = 0; i < 4; i++) {
+      for (let i = 0; i < 15; i++) {
         _pBirth(i, _initAx, _initAy, _initAz, -3 + Math.random() * 8);
-        _pLife[i] = Math.random() * _pMaxLife;  // randomise remaining life
+        _pLife[i] = Math.random() * _pMaxLife;
       }
 
       const _pGeo = new THREE.BufferGeometry();
       _pGeo.setAttribute('position', new THREE.BufferAttribute(_pPos, 3));
       const _pMat = new THREE.PointsMaterial({
-        size: 0.9,
+        size: 0.4,
         map: _ptTex,
-        color: new THREE.Color(0.807, 0.792, 0.798),
+        color: new THREE.Color(1.0, 1.0, 1.0),
         transparent: true,
-        opacity: 0.45,
+        opacity: 0.85,
         blending: THREE.AdditiveBlending,
         depthWrite: false,
         depthTest: true,     // rocket renders in front — particles stay behind it
@@ -857,7 +856,18 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
                 && hRatio < 0.55
                 && maxLat > _rs.x * 0.08;
               const isFuselage = hRatio > 0.30 && flatness > 1.0 && lat < _rs.x * 0.3;
-              if (isFin) {
+              const isNoseCone = wc.y > _rc.y
+                && wb.max.y > _rb.max.y - _rs.y * 0.06
+                && lat < _rs.x * 0.35
+                && hRatio < 0.50;
+              if (isNoseCone) {
+                const noseMat = mesh.material as THREE.MeshPhysicalMaterial;
+                noseMat.roughness        = 0.0;
+                noseMat.metalness        = 0.75;
+                noseMat.envMapIntensity  = 14.0;
+                noseMat.iridescence      = 0.6;
+                noseMat.needsUpdate      = true;
+              } else if (isFin) {
                 mesh.updateWorldMatrix(true, false);
                 const _yMin   = wb.min.y;
                 const _yMax   = wb.max.y;
@@ -891,6 +901,10 @@ gl_FragColor.rgb *= mix(1.6, 0.5, vFinT);`);
                 // Reduces metalness on world-left-facing normals and the bottom
                 // portion of the body, letting the original texture colour through.
                 mesh.updateWorldMatrix(true, false);
+                const fuseBaseMat = mesh.material as THREE.MeshPhysicalMaterial;
+                fuseBaseMat.envMapIntensity = 8.0;
+                fuseBaseMat.roughness       = 0.03;
+                fuseBaseMat.needsUpdate     = true;
                 const _yMin   = wb.min.y;
                 const _yMax   = wb.max.y;
                 const _baseMx = mesh.matrixWorld.clone();
@@ -1123,14 +1137,14 @@ roughnessFactor = mix(roughnessFactor, 0.25, _cBlend * 0.4);`);
         }
 
         if (spinGroup) {
-          spinGroup.quaternion.setFromAxisAngle(rocketBodyAxis, t * 2.0);
+          spinGroup.quaternion.setFromAxisAngle(rocketBodyAxis, t * 4.0);
         }
 
         if (pivot) {
-          const floatAmt = Math.sin(t * 1.2) * 0.6;
+          const floatAmt = Math.sin(t * 2.0) * 0.6 - 0.35;
           pivot.position.copy(rocketBodyAxis).multiplyScalar(floatAmt);
           pivot.rotation.z = mouseTilt.x * -0.35;
-          pivot.rotation.x = mouseTilt.y *  0.25;
+          pivot.rotation.x = mouseTilt.y *  0.06;
         }
 
         flameUniforms.time.value = t;
