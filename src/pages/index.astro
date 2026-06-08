@@ -1278,8 +1278,8 @@ roughnessFactor = mix(roughnessFactor, 0.0, _midB * 0.6);`);
         flameUniforms.time.value = t;
 
         // Sky fade: triggered at 80% scroll, then runs for exactly 1 second
-        if (scrollProgress >= 0.90 && skyFadeStartedAt < 0) skyFadeStartedAt = performance.now();
-        if (scrollProgress <  0.90) { skyFadeStartedAt = -1; skyFadedAt = -1; }
+        if (scrollProgress >= 0.95 && skyFadeStartedAt < 0) skyFadeStartedAt = performance.now();
+        if (scrollProgress <  0.95) { skyFadeStartedAt = -1; skyFadedAt = -1; }
 
         const _skyElapsed = skyFadeStartedAt >= 0 ? (performance.now() - skyFadeStartedAt) / 1000 : 0;
         const _skyT       = Math.min(_skyElapsed, 1);
