@@ -40,7 +40,7 @@
       #loader-logo-fill {
         position: absolute;
         inset: 0;
-        background: #FE712D;
+        background: #ff6200;
         -webkit-mask-image: url('/fly-rocket-media-logo.svg');
         mask-image: url('/fly-rocket-media-logo.svg');
         -webkit-mask-size: contain;
@@ -61,7 +61,7 @@
         z-index: 5;
       }
       #scroll-space {
-        height: 3000px;
+        height: 1600px;
         pointer-events: none;
       }
     </style>
@@ -87,8 +87,22 @@
       const loaderEl   = document.getElementById("loader")!;
       const loaderFill = document.getElementById("loader-logo-fill")! as HTMLElement;
 
-      // Track loading progress across two GLBs (each contributes 1/2)
-      const progress = { rocket: 0, flame: 0 };
+      // Track loading progress across sky + two GLBs (each contributes 1/3)
+      const progress = { rocket: 0, flame: 0, sky: 0 };
+      let skyLoaded = false;
+      let glbsReady = false;
+      function updateProgress() {
+        const pct = Math.min((progress.rocket + progress.flame + progress.sky) / 3 * 100, 98);
+        _loaderTarget = Math.max(_loaderTarget, pct);
+      }
+      function tryReveal() {
+        if (!skyLoaded || !glbsReady) return;
+        // Wait two render frames so the sky texture is GPU-uploaded and drawn
+        requestAnimationFrame(() => requestAnimationFrame(() => {
+          wrap.classList.add("ready");
+          hideLoader();
+        }));
+      }
       let _loaderTarget  = 0;   // real progress target (0-100)
       let _loaderDisplay = 0;   // smoothly interpolated display value
 
@@ -100,10 +114,7 @@
         requestAnimationFrame(loaderTick);
       })();
 
-      function updateProgress() {
-        const pct = Math.min((progress.rocket + progress.flame) / 2 * 100, 98);
-        _loaderTarget = Math.max(_loaderTarget, pct); // never go backwards
-      }
+      // (updateProgress defined above with sky included)
       function hideLoader() {
         _loaderTarget = 100;
         setTimeout(() => loaderEl.classList.add('hidden'), 700);
@@ -125,14 +136,13 @@
       let bgMesh: THREE.Mesh | null = null;
       let bgMat: THREE.MeshBasicMaterial | null = null;
       const starMats: THREE.PointsMaterial[] = [];
+      let scrollTarget   = 0;
       let scrollProgress = 0;
-      let skyFadeStartedAt = -1; // timestamp when sky fade was triggered (scroll hit 80%)
-      let skyFadedAt       = -1; // timestamp when sky fully gone (stars start countdown)
       // Rocket phase: 0=floating  1=launching  2=gone(off top)  3=returning(from below)
       let rocketPhase      = 0;
       let rocketPhaseStart = -1;
-      const LAUNCH_MS      = 3200; // ms to fly off top
-      const RETURN_MS      = 1600; // ms to re-enter from below
+      const LAUNCH_MS      = 1800; // ms to fly off top
+      const RETURN_MS      = 900; // ms to re-enter from below
       const scrollFade = document.getElementById('scroll-fade') as HTMLElement;
 
       // ── Background plane — 3D with mouse parallax ─────────────────────────
@@ -153,6 +163,10 @@
         bgMesh.renderOrder = -2;
         scene.add(bgMesh);
         scaleBg();
+        progress.sky = 1;
+        updateProgress();
+        skyLoaded = true;
+        tryReveal();
       });
 
       // ── Twinkling star field ───────────────────────────────────────────────
@@ -163,8 +177,8 @@
         const count = 40;
         const pos = new Float32Array(count * 3);
         for (let i = 0; i < count; i++) {
-          pos[i*3]   = (Math.random() - 0.5) * 38;
-          pos[i*3+1] = (Math.random() - 0.5) * 26;
+          pos[i*3]   = (Math.random() - 0.5) * 70;
+          pos[i*3+1] = (Math.random() - 0.5) * 50;
           pos[i*3+2] = -17 - Math.random() * 7;   // Z -17…-24, deep background
         }
         const geo = new THREE.BufferGeometry();
@@ -192,8 +206,8 @@
       // ── Hero stars — 4 bright individual stars that slowly pulse ──────────
       // Spread across the sky in different quadrants, never fully fade out.
       const heroPositions = [
-        [-8,  5, -19], [ 9,  7, -21],
-        [-11, -4, -20], [ 6, -7, -18],
+        [-22,  10, -19], [ 20,  12, -21],
+        [-24,  -9, -20], [ 18, -11, -18],
       ];
       heroPositions.forEach((p, i) => {
         const geo = new THREE.BufferGeometry();
@@ -911,16 +925,21 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
             const isWindowMesh = mesh.name === "toy_rocket__1_meshes_8_" || mesh.name === "toy_rocket__1_meshes_9_";
             if (!mesh.isMesh || !isWindowMesh) return;
             const mat = mesh.material as THREE.MeshPhysicalMaterial;
-            mat.roughness           = 0.08;
-            mat.metalness           = 0.85;
+            mat.roughness           = 0.0;
+            mat.metalness           = 0.95;
             mat.clearcoat           = 1.0;
             mat.clearcoatRoughness  = 0.0;
-            mat.envMapIntensity     = 12.0;
+            mat.envMapIntensity     = 20.0;
             mat.iridescence         = 0.8;
             mat.iridescenceIOR      = 1.5;
             mat.emissive            = new THREE.Color(0x000000);
             mat.emissiveIntensity   = 0;
             mat.needsUpdate         = true;
+            if (mesh.name === "toy_rocket__1_meshes_9_") {
+              mat.color.set(0xff6200);
+              mat.emissive.set(0xff6200);
+              mat.emissiveIntensity = 0.4;
+            }
           });
 
           // ── Apply fin gradient shader (overrides iridescence upgrade on fins) ──
@@ -950,9 +969,12 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
                 && hRatio < 0.50;
               if (isNoseCone) {
                 const noseMat = mesh.material as THREE.MeshPhysicalMaterial;
+                noseMat.color.set(0xff6200);
+                noseMat.emissive.set(0xff6200);
+                noseMat.emissiveIntensity = 0.4;
                 noseMat.roughness        = 0.0;
-                noseMat.metalness        = 0.75;
-                noseMat.envMapIntensity  = 8.0;
+                noseMat.metalness        = 0.92;
+                noseMat.envMapIntensity  = 16.0;
                 noseMat.iridescence      = 0.25;
                 noseMat.needsUpdate      = true;
               } else if (isFin) {
@@ -960,30 +982,49 @@ vec4 diffuseColor = vec4(_gc, opacity);`);
                 const _yMin   = wb.min.y;
                 const _yMax   = wb.max.y;
                 const _baseMx = mesh.matrixWorld.clone();
-                const finMat  = mesh.material as THREE.MeshPhysicalMaterial;
-                finMat.onBeforeCompile = (shader) => {
-                  shader.uniforms.yMin   = { value: _yMin };
-                  shader.uniforms.yMax   = { value: _yMax };
-                  shader.uniforms.baseMx = { value: _baseMx };
-                  shader.vertexShader = shader.vertexShader
-                    .replace('#include <common>',
-                      `#include <common>
-uniform mat4  baseMx;
-uniform float yMin, yMax;
-varying float vFinT;`)
-                    .replace('#include <begin_vertex>',
-                      `#include <begin_vertex>
-float _pY = (baseMx * vec4(position, 1.0)).y;
-vFinT = clamp((_pY - yMin) / (yMax - yMin), 0.0, 1.0);`);
-                  shader.fragmentShader = shader.fragmentShader
-                    .replace('#include <common>',
-                      `#include <common>
-varying float vFinT;`)
-                    .replace('#include <dithering_fragment>',
-                      `#include <dithering_fragment>
-gl_FragColor.rgb *= mix(1.6, 0.5, vFinT);`);
-                };
-                finMat.needsUpdate = true;
+                mesh.material = new THREE.ShaderMaterial({
+                  uniforms: {
+                    yMin:   { value: _yMin },
+                    yMax:   { value: _yMax },
+                    baseMx: { value: _baseMx },
+                  },
+                  vertexShader: /* glsl */`
+                    uniform float yMin, yMax;
+                    uniform mat4  baseMx;
+                    varying float vT;
+                    varying vec3  vNorm;
+                    varying vec3  vWorldPos;
+                    void main() {
+                      float preY = (baseMx * vec4(position, 1.0)).y;
+                      vT        = clamp((preY - yMin) / (yMax - yMin), 0.0, 1.0);
+                      vNorm     = normalMatrix * normal;
+                      vWorldPos = (modelMatrix * vec4(position, 1.0)).xyz;
+                      gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+                    }
+                  `,
+                  fragmentShader: /* glsl */`
+                    varying float vT;
+                    varying vec3  vNorm;
+                    varying vec3  vWorldPos;
+                    vec3 finGrad(float t) {
+                      if(t < 0.50) return mix(vec3(1.00, 0.384, 0.0), vec3(0.90, 0.345, 0.0), t / 0.50);
+                      return       mix(vec3(0.90, 0.345, 0.0), vec3(0.80, 0.306, 0.0), (t - 0.50) / 0.50);
+                    }
+                    void main() {
+                      vec3 col = finGrad(vT);
+                      vec3 n   = normalize(vNorm);
+                      float d   = max(dot(n, normalize(vec3(0.4, 0.8, 1.0))), 0.0);
+                      float f   = max(dot(n, normalize(vec3(0.0,-1.0, 0.3))), 0.0) * 0.25;
+                      float rim = pow(1.0 - max(dot(n, vec3(0.0, 0.0, 1.0)), 0.0), 4.0) * 0.30;
+                      col = col * (0.35 + d * 0.65 + f) + rim * vec3(0.80, 0.35, 0.05);
+                      vec3 viewDir = normalize(cameraPosition - vWorldPos);
+                      vec3 halfVec = normalize(viewDir + normalize(vec3(0.4, 0.8, 1.0)));
+                      float spec   = pow(max(dot(n, halfVec), 0.0), 512.0);
+                      col += vec3(1.0) * spec * 1.2;
+                      gl_FragColor = vec4(col, 1.0);
+                    }
+                  `,
+                });
               } else if (isFuselage) {
                 mesh.updateWorldMatrix(true, false);
                 const fuseBaseMat = mesh.material as THREE.MeshPhysicalMaterial;
@@ -1191,11 +1232,11 @@ roughnessFactor = mix(roughnessFactor, 0.0, _midB * 0.6);`);
           pivot.add(spinGroup);
           scene.add(pivot);
 
-          wrap.classList.add("ready");
-          hideLoader();
+          glbsReady = true;
+          tryReveal();
           window.scrollTo(0, 0);
           window.addEventListener("scroll", () => {
-            scrollProgress = Math.min(window.scrollY / 2500, 1);
+            scrollTarget = Math.min(window.scrollY / 1200, 1);
           }, { passive: true });
         })
         .catch((e: any) => console.error("GLB load error:", e));
@@ -1208,6 +1249,9 @@ roughnessFactor = mix(roughnessFactor, 0.0, _midB * 0.6);`);
         const t  = clock.getElapsedTime();
         const dt = Math.min(t - prevT, 0.05);
         prevT = t;
+
+        // Smooth scroll
+        scrollProgress += (scrollTarget - scrollProgress) * 0.07;
 
         // Smooth mouse tilt
         mouseTilt.x += (mouseTilt.tx - mouseTilt.x) * 0.04;
@@ -1277,29 +1321,37 @@ roughnessFactor = mix(roughnessFactor, 0.0, _midB * 0.6);`);
 
         flameUniforms.time.value = t;
 
-        // Sky fade: triggered at 80% scroll, then runs for exactly 1 second
-        if (scrollProgress >= 0.95 && skyFadeStartedAt < 0) skyFadeStartedAt = performance.now();
-        if (scrollProgress <  0.95) { skyFadeStartedAt = -1; skyFadedAt = -1; }
+        // ── Sky + stars: phase-based opacity ─────────────────────────────
+        // Phase 0: sky fully visible, stars normal
+        // Phase 1: sky fades out over last 25% of launch, stars boost
+        // Phase 2: sky gone, stars fully boosted
+        // Phase 3: sky fades back in as rocket returns, stars fade out
+        let _skyOp        = 1.0;
+        let _starBoostFac = 1.0;
+        if (rocketPhase === 1) {
+          const _lp = Math.min((performance.now() - rocketPhaseStart) / LAUNCH_MS, 1);
+          const _ft = Math.max(0, (_lp - 0.75) / 0.25);
+          const _fs = _ft * _ft * (3 - 2 * _ft);
+          _skyOp        = 1.0 - _fs;
+          _starBoostFac = 1.0 + _fs * 3.0;
+        } else if (rocketPhase === 2) {
+          _skyOp = 0.0;
+          const _msSincePhase2 = performance.now() - rocketPhaseStart - LAUNCH_MS;
+          const _sf = Math.min(_msSincePhase2 / 250, 1);
+          _starBoostFac = 4.0 * (1.0 - _sf * _sf);
+        } else if (rocketPhase === 3) {
+          const rt  = Math.min((performance.now() - rocketPhaseStart) / RETURN_MS, 1);
+          const _rs = rt * rt * (3 - 2 * rt);
+          _skyOp        = _rs;
+          _starBoostFac = 4.0 * (1.0 - _rs);
+        }
+        if (bgMat) bgMat.opacity = _skyOp;
+        _pMat.opacity            = _skyOp;
 
-        const _skyElapsed = skyFadeStartedAt >= 0 ? (performance.now() - skyFadeStartedAt) / 1000 : 0;
-        const _skyT       = Math.min(_skyElapsed, 1);
-        const _skyFade    = _skyT * _skyT * (3 - 2 * _skyT); // smoothstep over 1s
-        if (bgMat) bgMat.opacity = 1 - _skyFade;
-        _pMat.opacity            = 1 - _skyFade;
-
-        // When sky fully gone, start 1-second star countdown
-        if (_skyFade >= 1 && skyFadedAt < 0) skyFadedAt = performance.now();
-        if (_skyFade  < 1)                    skyFadedAt = -1;
-
-        // Stars: boost visibility once sky starts fading, then fade out over 1s after sky is gone
-        const _starBoost = skyFadeStartedAt >= 0 ? 4.0 : 1.0;
-        const _starFade  = skyFadedAt >= 0
-          ? Math.max(1 - (performance.now() - skyFadedAt) / 500, 0)
-          : 1;
         starMats.forEach((mat) => {
           const { blinkSpeed, blinkPhase, minOpacity, maxOpacity } = mat.userData;
           mat.opacity = Math.min(
-            (minOpacity + (maxOpacity - minOpacity) * (0.5 + 0.5 * Math.sin(t * blinkSpeed + blinkPhase))) * _starBoost * _starFade,
+            (minOpacity + (maxOpacity - minOpacity) * (0.5 + 0.5 * Math.sin(t * blinkSpeed + blinkPhase))) * _starBoostFac,
             1
           );
         });
